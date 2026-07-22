@@ -139,7 +139,7 @@ function looksDutch(s: string): boolean {
   return /\b(de|het|een|niet|geen|mislukt|verplicht|toegang|bestand|kolom|opnieuw|wacht|eerst|gelukt|fout|taken)\b/i.test(s);
 }
 
-// --- Kwaliteitsrapport-meldingen (QualityReportView, stap 2) ---
+// --- Kwaliteitsrapport-meldingen (lib/wizard/turns/prepareReview.ts) ---
 // De rekenkern schrijft deze in het Engels met dynamische delen (kolomnamen, weken);
 // hier per sjabloon vertaald mét behoud van die delen.
 

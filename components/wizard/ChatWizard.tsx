@@ -1,34 +1,44 @@
 "use client";
 
 // De chat-spine (linkerkant). Dit is de MOTOR van de wizard: een deterministische
-// toestandsmachine die de gebruiker stap voor stap door het hele MMM-proces loodst.
+// toestandsmachine die de gebruiker stap voor stap door het hele MMM-proces loodst — nu
+// volledig via tekst. Geen kaarten met knoppen/dropdowns/sliders meer: elke fase stelt zijn
+// vraag in de chat (met een genummerd menu als er een keuze is) en de gebruiker typt het
+// antwoord. De enige uitzondering is bestandsupload — ruwe CSV/XLSX-bytes kunnen niet als
+// tekst — die krijgt een bijlage-affordance in de composer, net als in elke chat-app.
 //
-// Token-arm ontwerp:
-//  - Elke fase-bubbel + elke kaart is vooraf geschreven en kost 0 tokens.
-//  - Kolomrollen komen uit de goedkope classificatie die al bij upload draaide.
-//  - Het standaard-modelpad is volledig deterministisch.
-//  - De architect (Claude) wordt alleen ingeschakeld als de gebruiker vrij typt of
-//    expliciet "Laat de AI optimaliseren" kiest. Een voorstel dat terugkomt kan met één
-//    klik worden overgenomen (start dezelfde prepare/fit-flow als de kaarten).
+// Token-arm ontwerp, ongewijzigd t.o.v. de kaarten-versie:
+//  - Elke fase-bubbel is vooraf geschreven (lib/wizard/script.ts) en kost 0 tokens.
+//  - Genummerde menu's worden deterministisch geparst (lib/wizard/questions.ts) — 0 tokens.
+//  - De architect (Claude) wordt alleen ingeschakeld als de gebruiker vrij typt, een
+//    menukeuze dat expliciet vraagt (bv. "gebruik de aanbevolen instellingen"), of een
+//    voorstel bevestigt. Een voorstel wordt met een getypt "ja" overgenomen (start dezelfde
+//    prepare/fit-flow als voorheen de kaarten).
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, Send, Bot, Undo2 } from "lucide-react";
+import { Send, Bot, Undo2, Paperclip } from "lucide-react";
 import { humanizeError } from "@/lib/humanizeMessage";
 import { createClient } from "@/lib/supabase/client";
 import { useWizardChat } from "@/components/WizardChatContext";
 import { derivePhase, isWaitingPhase, type WizardPhase } from "@/lib/wizard/phase";
-import { PHASE_SCRIPT } from "@/lib/wizard/script";
-import {
-  UploadCard,
-  InspectCard,
-  PrepareCard,
-  PrepareReviewCard,
-  ContextCard,
-  TuningCard,
-  ReviewCard,
-  FitRefineButton,
-} from "@/components/wizard/cards";
+import { PHASE_SCRIPT, PHASE_STEPS } from "@/lib/wizard/script";
+import { matchOption, YES_OPTION } from "@/lib/wizard/questions";
+import { STANDARD_SAMPLE } from "@/lib/wizard/tuningDefaults";
+import { uploadSourceFile } from "@/lib/wizard/turns/upload";
+import * as inspectTurn from "@/lib/wizard/turns/inspect";
+import * as prepareRecipeTurn from "@/lib/wizard/turns/prepareRecipe";
+import * as prepareReviewTurn from "@/lib/wizard/turns/prepareReview";
+import * as contextTurn from "@/lib/wizard/turns/context";
+import * as tuningTurn from "@/lib/wizard/turns/tuning";
+import * as fitFailedTurn from "@/lib/wizard/turns/fitFailed";
+import * as reviewTurn from "@/lib/wizard/turns/review";
+import type { TurnEnv, TurnReplyResult } from "@/lib/wizard/turns/types";
+import { DatasetPreviewTable } from "@/components/DatasetPreviewTable";
+import { SummaryView } from "@/components/SummaryView";
+import { HierarchicalSummaryView } from "@/components/HierarchicalSummaryView";
+import { AnalysisView } from "@/components/AnalysisView";
+import { isHierSummary } from "@/lib/types";
 import type { Dataset, Job, JobConfig, ModelRun, SourceFile } from "@/lib/types";
 import { Markdown } from "@/components/Markdown";
 
@@ -43,23 +53,52 @@ const TOOL_LABEL: Record<string, string> = {
   record_business_context: "de zakelijke context",
 };
 
+const YES_OPTION_LABEL = `Typ "${YES_OPTION.label}"`;
+
 interface Turn {
   role: "user" | "assistant";
   text: string;
   streaming?: boolean;
-  proposedRecipe?: unknown;
-  proposedConfig?: unknown;
-  // De gestreamde redenering (extended thinking) — apart van het zichtbare antwoord,
-  // zodat de bouwer kan zien DAT en WAARMEE de architect bezig is.
   thinking?: string;
   phase?: AiPhase;
   toolName?: string;
 }
 
-// Assistent-antwoorden komen als markdown terug (kopjes/bullets/**vet**, zie de
-// system-prompts in lib/anthropic/) — die renderen we dus ook als markdown in plaats van
-// als platte, pre-wrapped tekst. De gebruiker typt zelf geen markdown, dus die bubbel
-// blijft platte tekst met behouden regeleinden.
+interface PendingProposal {
+  kind: "recipe" | "config";
+  payload: unknown;
+}
+
+// Per fase: hoe de vaste intro-tekst (+ eventueel menu) wordt opgebouwd, en hoe een getypt
+// antwoord wordt verwerkt. Ontbreekt een fase hier (upload/prepare_running/fitting), dan is
+// er geen fase-specifieke intro/afhandeling — upload heeft de bijlage-affordance, de twee
+// wacht-fasen hebben alleen de wacht-indicator.
+const TURN_MODULES: Partial<
+  Record<WizardPhase, { intro: (env: TurnEnv) => string; resolve: (env: TurnEnv, reply: string) => Promise<TurnReplyResult> }>
+> = {
+  inspect: inspectTurn,
+  prepare_recipe: prepareRecipeTurn,
+  prepare_failed: { intro: prepareRecipeTurn.introFailed, resolve: prepareRecipeTurn.resolve },
+  prepare_review: prepareReviewTurn,
+  context: contextTurn,
+  tuning: tuningTurn,
+  fit_failed: fitFailedTurn,
+  review: reviewTurn,
+  published: reviewTurn,
+};
+
+function matchBackCommand(text: string): { phase: WizardPhase; label: string } | "now" | null {
+  const t = text.trim().toLowerCase();
+  if (!/^terug\b/.test(t)) return null;
+  if (/^terug(\s+naar)?\s*(nu)?$/.test(t)) return "now";
+  for (const step of PHASE_STEPS) {
+    if (!step.backTarget) continue;
+    const label = step.label.replace(/^\d+\.\s*/, "").toLowerCase();
+    if (t.includes(label)) return { phase: step.backTarget, label: step.label };
+  }
+  return null;
+}
+
 // Wachtindicator met verstreken-tijd én stall-detectie: bij een asynchrone stap (samenvoegen
 // of berekenen) toont hij hoelang we al wachten, en na een drempel een escalatiebanner — zodat
 // een vastgelopen worker niet als een eeuwig draaiende spinner zonder signaal verschijnt.
@@ -131,7 +170,7 @@ export function ChatWizard({
   contextProvided: boolean;
 }) {
   const router = useRouter();
-  const { pendingChatMessage, clearPendingChatMessage, overridePhase, overrideReason, clearOverridePhase } =
+  const { pendingChatMessage, clearPendingChatMessage, overridePhase, overrideReason, clearOverridePhase, goToPhase, reuseJobConfig, setReuseJobConfig, clearReuseJobConfig } =
     useWizardChat();
   // "Overslaan" bij de zakelijke context bewaren we per project, zodat de stap niet na een
   // refresh of terugkomst opnieuw opduikt (client-side, geen serverwijziging nodig).
@@ -145,39 +184,40 @@ export function ChatWizard({
     }
   }, [skipKey]);
   const naturalPhase: WizardPhase = derivePhase({ sources, dataset, jobs, runs, contextProvided, skipContext });
-  // Terugkoppeling/iteratie (blueprint stap 7): een override toont een eerdere fase zonder
-  // de deterministische afleiding zelf aan te passen — zie WizardChatContext.goToPhase.
-  // Elke kaart die hierdoor opnieuw wordt getoond ruimt de override zelf op zodra de
-  // bouwer 'm daadwerkelijk opnieuw indient (onDone), zodat de flow dan vanzelf weer de
-  // actuele/nieuwe toestand toont (bijv. een nieuwe fit i.p.v. terug naar "review").
+  // Terugkoppeling/iteratie: een override toont een eerdere fase zonder de deterministische
+  // afleiding zelf aan te passen (zie WizardChatContext.goToPhase).
   const phase: WizardPhase = overridePhase ?? naturalPhase;
   const source = sources[0] ?? null;
-  const latestFailedFit = jobs.find((j) => (j.type === "fit" || j.type === "fit_hierarchical") && j.status === "failed");
   const activeFitJob = jobs.find(
     (j) => (j.type === "fit" || j.type === "fit_hierarchical") && (j.status === "queued" || j.status === "running"),
   );
-  // Startmoment van de lopende async-stap, voor de verstreken-tijd/stall-melding.
   const waitingSince =
     naturalPhase === "fitting"
       ? activeFitJob?.created_at ?? null
       : naturalPhase === "prepare_running"
         ? dataset?.created_at ?? null
         : null;
-  const latestPriorPredictive =
-    jobs.filter((j) => j.type === "prior_predictive").sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ??
-    null;
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [pendingProposal, setPendingProposal] = useState<PendingProposal | null>(null);
+  const [phaseState, setPhaseState] = useState<unknown>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Fase-lokale gesprekstoestand (bv. "we zijn een correctie aan het opschrijven") hoort bij
+  // precies één fase — wissen zodra de fase wisselt, anders lekt 'm door naar de volgende.
+  useEffect(() => {
+    setPhaseState(null);
+    setPendingProposal(null);
+  }, [phase]);
+
   // Realtime: zodra de worker een dataset/job/run bijwerkt, ververst de server-render en
-  // schuift de fase vanzelf door — zonder pollen. Eén subscriptie op de drie tabellen die
-  // de async voortgang dragen (datasets: samenvoegen; jobs: fase-overgangen; model_runs:
-  // resultaat verschijnt). Geen tokens, alleen een server-refresh.
+  // schuift de fase vanzelf door — zonder pollen.
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase.channel(`wizard-${projectId}`);
@@ -194,11 +234,8 @@ export function ChatWizard({
     };
   }, [projectId, router]);
 
-  // Vangnet: mocht een Realtime-event gemist worden (verbinding weggevallen), pollt de
-  // client zachtjes door zolang we nog op de worker wachten — traag, want Realtime is de
-  // hoofdroute. Gebaseerd op de ECHTE fase, niet op een eventuele terug-navigatie-override:
-  // een lopende fit blijft op de achtergrond doorlopen, ook als de bouwer intussen een
-  // eerdere stap bekijkt.
+  // Vangnet: mocht een Realtime-event gemist worden, pollt de client zachtjes door zolang we
+  // nog op de worker wachten.
   useEffect(() => {
     if (!isWaitingPhase(naturalPhase)) return;
     const id = setInterval(() => router.refresh(), 10000);
@@ -209,10 +246,8 @@ export function ChatWizard({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, busy, phase]);
 
-  // Een kaart elders (bv. een kwaliteitspoort-waarschuwing of "waarom is dit niet goed
-  // genoeg?" in SummaryView) kan een kant-en-klare vraag rechtstreeks naar de architect
-  // sturen via WizardChatContext — wacht op een eventuele lopende beurt in plaats van hem
-  // te laten vallen.
+  // Een paneel elders (bv. een kwaliteitspoort-waarschuwing) kan een kant-en-klare vraag
+  // rechtstreeks naar de architect sturen via WizardChatContext.
   useEffect(() => {
     if (pendingChatMessage == null || busy) return;
     clearPendingChatMessage();
@@ -220,14 +255,38 @@ export function ChatWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingChatMessage, busy]);
 
-  // Vrij typen → de architect (streaming). Dit is de enige plek in de happy path waar
-  // tokens verbruikt worden buiten de twee expliciete AI-momenten.
-  async function send(preset?: string) {
-    const text = (preset ?? input).trim();
-    if (!text || busy) return;
-    if (!preset) setInput("");
+  const turnEnv: TurnEnv = {
+    projectId,
+    source,
+    dataset,
+    jobs,
+    runs,
+    jobConfigs,
+    kpiMargin,
+    phaseState,
+    setPhaseState,
+    reuseJobConfig,
+    setReuseJobConfig,
+    pushMessage: (text: string) => setTurns((prev) => [...prev, { role: "assistant", text }]),
+    refresh: () => router.refresh(),
+    skipBusinessContext: () => {
+      try {
+        localStorage.setItem(skipKey, "1");
+      } catch {
+        // Bewaren niet mogelijk — de sessie-state hieronder volstaat voor nu.
+      }
+      setSkipContext(true);
+      clearOverridePhase();
+    },
+    goToPhase,
+    askArchitect: (message: string) => askArchitectMessage(message),
+  };
+
+  // De architect-beurt zelf (streaming) — losstaand van de publieke send()-busy-check, want
+  // dit wordt ook aangeroepen NADAT een menukeuze al binnen een lopende beurt zit (bv.
+  // "gebruik de aanbevolen instellingen"). Beheert zijn eigen busy-status.
+  async function runArchitectTurn(text: string) {
     setError(null);
-    setTurns((prev) => [...prev, { role: "user", text }]);
     setBusy(true);
     try {
       const res = await fetch("/api/chat", {
@@ -238,7 +297,6 @@ export function ChatWizard({
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({}));
         setError(humanizeError(j.error, "Er ging iets mis — probeer het opnieuw.").text);
-        setBusy(false);
         return;
       }
       setTurns((prev) => [...prev, { role: "assistant", text: "", streaming: true }]);
@@ -276,21 +334,23 @@ export function ChatWizard({
             continue;
           }
           if (ev.type === "phase") {
-            // Statusovergang (denken → schrijven/voorstel) — puur informatief, geen tokens.
             updateLast((t) => ({ ...t, phase: (ev.phase as AiPhase) ?? null, toolName: ev.tool ?? t.toolName }));
           } else if (ev.type === "thinking_delta" && ev.text) {
             updateLast((t) => ({ ...t, thinking: (t.thinking ?? "") + ev.text, phase: "thinking" }));
           } else if (ev.type === "delta" && ev.text) {
             updateLast((t) => ({ ...t, text: t.text + ev.text, phase: "text" }));
           } else if (ev.type === "done") {
-            updateLast((t) => ({
-              ...t,
-              text: ev.reply || t.text || "Geen aanvullende toelichting.",
-              streaming: false,
-              phase: null,
-              proposedRecipe: ev.proposedRecipe ?? undefined,
-              proposedConfig: ev.proposedConfig ?? undefined,
-            }));
+            const proposal: PendingProposal | null = ev.proposedRecipe
+              ? { kind: "recipe", payload: ev.proposedRecipe }
+              : ev.proposedConfig
+                ? { kind: "config", payload: ev.proposedConfig }
+                : null;
+            setPendingProposal(proposal);
+            const replyText = ev.reply || "Geen aanvullende toelichting.";
+            const menu = proposal
+              ? `\n\n${YES_OPTION_LABEL} om dit toe te passen, of beschrijf wat er anders moet.`
+              : "";
+            updateLast((t) => ({ ...t, text: replyText + menu, streaming: false, phase: null }));
           } else if (ev.type === "error") {
             setError(humanizeError(ev.error, "Er ging iets mis in het antwoord.").text);
             updateLast({ streaming: false, phase: null });
@@ -305,8 +365,14 @@ export function ChatWizard({
     }
   }
 
-  // Een AI-voorstel overnemen: dezelfde flow als de kaarten, zodat de gebruiker in de vaste
-  // pijplijn blijft. Een recept start de prepare-job; een config start de fit.
+  function askArchitectMessage(text: string) {
+    setTurns((prev) => [...prev, { role: "user", text }]);
+    void runArchitectTurn(text);
+  }
+
+  // Een AI-voorstel overnemen ("ja, toepassen"): dezelfde flow als de oude kaarten. Een
+  // recept start de prepare-job; een config bevestigt eerst de tuning (net als de oude
+  // "Start de berekening"-knop) en start daarna de fit.
   async function applyProposal(kind: "recipe" | "config", payload: unknown) {
     setBusy(true);
     setError(null);
@@ -319,114 +385,109 @@ export function ChatWizard({
           body: JSON.stringify({ project_id: projectId, recipe }),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error);
+        setTurns((prev) => [...prev, { role: "assistant", text: "Toegepast — ik voeg de data samen en controleer de kwaliteit." }]);
       } else {
         const { reasoning: _r, ...rest } = payload as { reasoning?: string } & Record<string, unknown>;
-        const config = { ...rest, sample: { draws: 1000, tune: 1000, chains: 4 } };
+        const model = (rest.model as Record<string, unknown> | undefined) ?? {};
+        if (dataset) {
+          const { kpi: _kpi, ...tuningDraft } = model;
+          const confirmRes = await fetch(`/api/datasets/${dataset.id}/confirm-tuning`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tuning_draft: tuningDraft }),
+          });
+          if (!confirmRes.ok) throw new Error((await confirmRes.json().catch(() => ({}))).error);
+        }
+        const config = { ...rest, sample: reuseJobConfig?.sample ?? STANDARD_SAMPLE };
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ project_id: projectId, type: "fit", dataset_id: dataset?.id ?? null, config }),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error);
+        clearReuseJobConfig();
+        setTurns((prev) => [...prev, { role: "assistant", text: "Toegepast — de berekening start." }]);
       }
       router.refresh();
     } catch (e) {
       setError(humanizeError((e as Error).message, "Het voorstel overnemen is niet gelukt.").text);
+    } finally {
       setBusy(false);
     }
   }
 
-  function askAiToOptimize() {
-    inputRef.current?.focus();
-    void send(
-      "Kijk naar de goedgekeurde dataset en de zakelijke context en stel een geoptimaliseerde " +
-        "modelconfiguratie voor (kanaaltypes, adstock/saturatie, trend/seizoen, likelihood).",
-    );
+  async function send(preset?: string) {
+    const text = (preset ?? input).trim();
+    if (!text || busy) return;
+    if (!preset) setInput("");
+    setError(null);
+    setTurns((prev) => [...prev, { role: "user", text }]);
+    setBusy(true);
+
+    // 1. Reageert dit op een openstaand AI-voorstel? Alleen een duidelijke "ja" wordt
+    // deterministisch overgenomen; al het andere loopt gewoon door als een nieuw bericht
+    // (het voorstel blijft dan niet hangen — een vervolgvraag gaat gewoon naar de architect).
+    if (pendingProposal) {
+      const proposal = pendingProposal;
+      setPendingProposal(null);
+      if (matchOption(text, [YES_OPTION])) {
+        await applyProposal(proposal.kind, proposal.payload);
+        return;
+      }
+    }
+
+    // 2. Globaal "terug naar <stap>"-commando.
+    const back = matchBackCommand(text);
+    if (back) {
+      if (back === "now") {
+        clearOverridePhase();
+        setTurns((prev) => [...prev, { role: "assistant", text: "Oké, terug naar nu." }]);
+      } else {
+        goToPhase(back.phase, "je vroeg om terug te gaan");
+        setTurns((prev) => [...prev, { role: "assistant", text: `Oké, terug naar ${back.label}.` }]);
+      }
+      setBusy(false);
+      return;
+    }
+
+    // 3. Fase-lokale, deterministische afhandeling (0 tokens) — een herkende menukeuze of
+    // een simpel "nee"/"overslaan".
+    const turnModule = TURN_MODULES[phase];
+    if (turnModule) {
+      const result = await turnModule.resolve(turnEnv, text);
+      if (result.handled) {
+        if (result.reply) setTurns((prev) => [...prev, { role: "assistant", text: result.reply as string }]);
+        if (result.refresh) router.refresh();
+        if (!result.delegatedBusy) setBusy(false);
+        return;
+      }
+    }
+
+    // 4. Vrij typen → de architect (streaming).
+    await runArchitectTurn(text);
+  }
+
+  async function handleUpload(files: FileList | File[]) {
+    setUploadBusy(true);
+    setError(null);
+    const { error: uploadError } = await uploadSourceFile(projectId, files);
+    setUploadBusy(false);
+    if (uploadError) {
+      setError(uploadError);
+      return;
+    }
+    router.refresh();
   }
 
   const script = PHASE_SCRIPT[phase];
+  const turnModule = TURN_MODULES[phase];
+  const turnIntro = turnModule ? turnModule.intro(turnEnv) : "";
+  const introText = turnIntro ? `${script.message}\n\n${turnIntro}` : script.message;
 
-  // De kaart die bij de huidige fase hoort. Fasen die als "terug"-doel kunnen worden
-  // geopend (zie PHASE_STEPS.backTarget) krijgen onDone={clearOverridePhase} mee, zodat
-  // een daadwerkelijke nieuwe indiening de override opruimt en de flow weer de
-  // actuele/nieuwe toestand toont.
-  function renderCard() {
-    switch (phase) {
-      case "upload":
-        return <UploadCard projectId={projectId} source={source} />;
-      case "inspect":
-        return source ? <InspectCard projectId={projectId} source={source} onDone={clearOverridePhase} /> : null;
-      case "prepare_recipe":
-        return source ? <PrepareCard projectId={projectId} source={source} onDone={clearOverridePhase} /> : null;
-      case "prepare_failed":
-        return (
-          <div className="rounded-xl border border-danger/40 bg-danger-dim p-4">
-            <p className="text-sm text-fg">{dataset?.error ?? "Onbekende fout bij het samenvoegen."}</p>
-            {source && (
-              <div className="mt-3">
-                <PrepareCard projectId={projectId} source={source} onDone={clearOverridePhase} />
-              </div>
-            )}
-          </div>
-        );
-      case "prepare_review":
-        return dataset ? <PrepareReviewCard dataset={dataset} /> : null;
-      case "context":
-        return (
-          <ContextCard
-            projectId={projectId}
-            industry={industry}
-            description={companyDescription}
-            kpiMargin={kpiMargin}
-            onSkip={() => {
-              try {
-                localStorage.setItem(skipKey, "1");
-              } catch {
-                // Bewaren niet mogelijk — de sessie-state hieronder volstaat voor nu.
-              }
-              setSkipContext(true);
-              clearOverridePhase();
-            }}
-            onDone={clearOverridePhase}
-          />
-        );
-      case "tuning":
-        return dataset ? (
-          <TuningCard
-            projectId={projectId}
-            dataset={dataset}
-            latestPriorPredictive={latestPriorPredictive}
-            onAskAi={askAiToOptimize}
-            onDone={clearOverridePhase}
-          />
-        ) : null;
-      case "fit_failed":
-        return (
-          <div className="rounded-xl border border-danger/40 bg-danger-dim p-4">
-            <p className="text-sm text-fg">{latestFailedFit?.error ?? "Onbekende fout bij de berekening."}</p>
-            <div className="mt-3">
-              <FitRefineButton projectId={projectId} />
-            </div>
-            {dataset && (
-              <div className="mt-3">
-                <TuningCard
-                  projectId={projectId}
-                  dataset={dataset}
-                  latestPriorPredictive={latestPriorPredictive}
-                  onAskAi={askAiToOptimize}
-                  onDone={clearOverridePhase}
-                />
-              </div>
-            )}
-          </div>
-        );
-      case "review":
-      case "published":
-        return runs.length > 0 ? <ReviewCard projectId={projectId} runs={runs} jobConfigs={jobConfigs} kpiMargin={kpiMargin} /> : null;
-      default:
-        return null; // prepare_running / fitting: alleen de wacht-bubbel + spinner
-    }
-  }
+  const viewedRun = (phase === "review" || phase === "published") && runs.length > 0 ? reviewTurn.viewedRun(turnEnv) : null;
+  const viewedIsHierarchical = viewedRun ? isHierSummary(viewedRun.summary) : false;
+  const viewedLikelihood = viewedRun?.job_id ? jobConfigs[viewedRun.job_id]?.model.likelihood : undefined;
+  const isCountKpi = viewedLikelihood === "poisson" || viewedLikelihood === "negative_binomial";
 
   return (
     <div className="flex h-full flex-col">
@@ -449,19 +510,26 @@ export function ChatWizard({
           </div>
         )}
 
-        {/* De vaste fase-bubbel + kaart. */}
+        {/* De vaste fase-bubbel + eventueel passieve (niet-interactieve) weergave. */}
         <div className="flex items-start gap-2">
           <div className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full bg-accent-dim text-accent">
             <Bot className="h-4 w-4" />
           </div>
           <div className="flex-1 space-y-3">
-            <Bubble role="assistant" text={script.message} />
-            {renderCard()}
+            <Bubble role="assistant" text={introText} />
+            {phase === "prepare_review" && dataset?.preview && <DatasetPreviewTable preview={dataset.preview} />}
+            {viewedRun &&
+              (viewedIsHierarchical ? (
+                <HierarchicalSummaryView summary={viewedRun.summary as unknown as Parameters<typeof HierarchicalSummaryView>[0]["summary"]} />
+              ) : (
+                <SummaryView summary={viewedRun.summary} kpiMargin={kpiMargin} isCountKpi={isCountKpi} />
+              ))}
+            {viewedRun && !viewedIsHierarchical && viewedRun.analysis && <AnalysisView analysis={viewedRun.analysis} />}
             {isWaitingPhase(phase) && <WaitingIndicator phase={phase} since={waitingSince} />}
           </div>
         </div>
 
-        {/* Vrij-tekst-gesprek met de architect (escape hatch). */}
+        {/* Vrij-tekst-gesprek met de architect. */}
         {turns.map((t, i) => (
           <div key={i}>
             {t.role === "assistant" && t.streaming && (
@@ -486,24 +554,49 @@ export function ChatWizard({
               </details>
             )}
             <Bubble role={t.role} text={t.text || (t.streaming ? "…" : "")} />
-            {t.proposedRecipe != null && (
-              <button onClick={() => applyProposal("recipe", t.proposedRecipe)} disabled={busy} className="mt-1 inline-flex items-center gap-1 rounded-lg border border-strong bg-surface-2 px-3 py-1.5 text-xs font-medium text-accent transition hover:bg-surface-3 disabled:opacity-50">
-                <Sparkles className="h-3 w-3" /> Voorstel overnemen & samenvoegen
-              </button>
-            )}
-            {t.proposedConfig != null && (
-              <button onClick={() => applyProposal("config", t.proposedConfig)} disabled={busy} className="mt-1 inline-flex items-center gap-1 rounded-lg border border-strong bg-surface-2 px-3 py-1.5 text-xs font-medium text-accent transition hover:bg-surface-3 disabled:opacity-50">
-                <Sparkles className="h-3 w-3" /> Voorstel overnemen & berekenen
-              </button>
-            )}
           </div>
         ))}
         {error && <p className="text-sm text-danger">{error}</p>}
         <div ref={bottomRef} />
       </div>
 
-      {/* Vrij-tekst invoer — spaarzaam te gebruiken escape naast de vaste chips/kaarten. */}
+      {/* Composer: vrije tekst + (alleen tijdens upload) de bijlage-affordance — het enige
+          niet-tekst-element in de hele wizard, omdat ruwe bestandsbytes geen chattekst zijn. */}
       <div className="border-t border-border p-3">
+        {phase === "upload" && (
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (e.dataTransfer.files.length > 0) void handleUpload(e.dataTransfer.files);
+            }}
+            className={`mb-2 flex flex-wrap items-center gap-2 rounded-lg border-2 border-dashed px-3 py-2 text-xs transition ${
+              dragOver ? "border-accent/50 bg-accent-dim text-fg" : "border-border text-fg-faint"
+            }`}
+          >
+            <Paperclip className="h-3.5 w-3.5 flex-none" />
+            <span>Sleep je CSV hierheen, of</span>
+            <label className="cursor-pointer font-medium text-accent hover:underline">
+              kies een bestand
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                disabled={uploadBusy}
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) void handleUpload(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {uploadBusy && <span>Uploaden…</span>}
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             ref={inputRef}
@@ -516,7 +609,7 @@ export function ChatWizard({
               }
             }}
             rows={1}
-            placeholder="Iets vragen aan de AI (optioneel — de knoppen hierboven loodsen je vanzelf verder)"
+            placeholder="Typ je antwoord…"
             className="flex-1 resize-none rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-fg placeholder:text-fg-faint outline-none transition focus:border-strong"
           />
           <button onClick={() => send()} disabled={!input.trim() || busy} className="rounded-lg bg-accent p-2 text-bg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-fg-faint" aria-label="Versturen">

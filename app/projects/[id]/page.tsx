@@ -34,8 +34,9 @@ export default async function ProjectDetail({ params }: { params: { id: string }
       supabase.schema("mmm").from("source_files").select("*").eq("project_id", p.id).order("created_at"),
       supabase.schema("mmm").from("jobs").select("*").eq("project_id", p.id).order("created_at", { ascending: false }),
       // Trimmed columns: `analysis` bevat base64-PNG's van de diepe-analysestap en kan
-      // fors zijn per run. RunHistory heeft alleen summary.quality_gate + datums nodig;
-      // analysis/client_summary worden hieronder apart voor de nieuwste run opgehaald.
+      // fors zijn per run. De runlijst in de review-fase heeft alleen summary.quality_gate
+      // + datums nodig; analysis/client_summary worden hieronder apart voor de nieuwste run
+      // opgehaald.
       supabase
         .schema("mmm")
         .from("model_runs")

@@ -18,6 +18,10 @@ async function handlePost(request: Request) {
 
   const body = await request.json().catch(() => null);
   const sourceFileId: string | undefined = body?.source_file_id;
+  // Optionele vrije-tekst correctie van de bouwer op een eerdere classificatie (zie
+  // lib/wizard/turns/inspect.ts) — dezelfde route, alleen de user-turn krijgt de correctie
+  // erbij zodat de gedwongen tool-call een aangepaste, geldige ColumnMapping teruggeeft.
+  const correction: string | undefined = typeof body?.correction === "string" ? body.correction : undefined;
   if (!sourceFileId) {
     return NextResponse.json({ error: "source_file_id is verplicht" }, { status: 400 });
   }
@@ -44,7 +48,12 @@ async function handlePost(request: Request) {
   let response: Anthropic.Message;
   try {
     response = await client.messages.create(
-      buildClassifyRequest(file.name as string, file.preview as string, (file.profile as SourceProfile | null) ?? null),
+      buildClassifyRequest(
+        file.name as string,
+        file.preview as string,
+        (file.profile as SourceProfile | null) ?? null,
+        correction,
+      ),
     );
   } catch (err) {
     return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });

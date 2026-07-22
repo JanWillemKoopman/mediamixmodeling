@@ -1,16 +1,15 @@
 // Per kwaliteitsissue-code: wat betekent dit voor het model, en wat is de logische
 // vervolgactie? Het kwaliteitsrapport wordt hiermee actionable in plaats van een lijst
-// zinnen: elke fout/waarschuwing krijgt een "waarom boeit dit"-uitleg en waar mogelijk
-// een concrete actiehint (vaak: een gerichte chatvraag aan de AI). Onbekende codes —
-// oudere datasets, toekomstige checks — vallen in de UI gewoon terug op de kale melding,
-// dus deze registry hoeft nooit compleet te zijn om te werken.
+// zinnen: elke fout/waarschuwing krijgt een "waarom boeit dit"-uitleg en waar mogelijk een
+// concrete actiehint (lib/wizard/turns/prepareReview.ts rendert beide als tekst). Onbekende
+// codes — oudere datasets, toekomstige checks — vallen in de UI gewoon terug op de kale
+// melding, dus deze registry hoeft nooit compleet te zijn om te werken.
 export interface QualityIssueInfo {
   // Eén à twee zinnen: waarom is dit relevant voor een betrouwbaar MMM?
   explain: string;
-  // Concreet vervolg — als chatPrompt gezet is, wordt dit de knoptekst.
+  // Concreet vervolg — in gewone taal; de bouwer beschrijft zelf wat hij wil als hij het
+  // met de architect wil bespreken (die het kwaliteitsrapport al in zijn context heeft).
   action?: string;
-  // Kant-en-klare prompt voor de wizard-chat om dit specifieke issue op te lossen.
-  chatPrompt?: string;
 }
 
 export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
@@ -22,9 +21,7 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
   negative_spend: {
     explain:
       "Negatieve uitgaven (refunds, correcties) bestaan boekhoudkundig, maar het model interpreteert spend als mediadruk — negatieve druk bestaat niet en verstoort de adstock-schatting.",
-    action: "Laat de AI een opschoonstap voorstellen",
-    chatPrompt:
-      "Mijn spend-data bevat negatieve weken (refunds/correcties). Stel een passende opschoonstap voor: op nul zetten, verrekenen met omliggende weken, of iets beters gegeven deze data.",
+    action: "Beschrijf dit aan de architect — die stelt een passende opschoonstap voor.",
   },
   all_zero_channel: {
     explain:
@@ -39,16 +36,12 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
   duplicate_dates_aggregated: {
     explain:
       "Meerdere verschillende rijen op dezelfde datum worden opgeteld. Bevat het bestand een totaalrij naast detailrijen, dan telt alles dubbel — een klassieke stille fout.",
-    action: "Laat de AI het bestand controleren",
-    chatPrompt:
-      "Eén van mijn bronbestanden heeft meerdere verschillende rijen per datum. Kijk naar de voorbeeldrijen en stel vast of hier dubbeltelling dreigt (bv. totaalrij + detailrijen); stel zo nodig een filter- of dedupe-opschoonstap voor.",
+    action: "Vraag de architect het bestand te controleren op dubbeltelling.",
   },
   too_many_parameters: {
     explain:
       "Elk kanaal kost meerdere parameters (effect, na-ijl, verzadiging). Met te weinig weken per kanaal kan het model de kanalen niet uit elkaar houden en worden alle schattingen onbetrouwbaar breed.",
     action: "Voeg meer weken data toe, of laat de AI voorstellen welke kanalen samengevoegd kunnen worden.",
-    chatPrompt:
-      "Ik heb te veel kanalen voor het aantal weken data. Stel voor welke kanalen ik het best kan samenvoegen (bv. op basis van kanaaltype of correlatie) om het model schatbaar te maken.",
   },
   partial_edge_week: {
     explain:
@@ -59,8 +52,6 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
     explain:
       "Deze kanalen bewegen als groep te veel samen (ook al lijkt geen enkel paar los verdacht). Het model kan hun afzonderlijke bijdrage dan niet vaststellen — juist de ROI per kanaal wordt onbetrouwbaar.",
     action: "Laat de AI de kanalen samenvoegen of adviseren welke je kunt laten vallen",
-    chatPrompt:
-      "Het kwaliteitsrapport meldt sterke multicollineariteit (hoge VIF) tussen enkele kanalen. Adviseer welke ik het best kan samenvoegen of laten vallen, of stel een combine-opschoonstap voor die ze bundelt tot een totaal.",
   },
   coarse_cadence: {
     explain:
@@ -76,15 +67,11 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
     explain:
       "Twee vrijwel identieke kanalen kan het model niet los van elkaar schatten: de bijdrage wordt willekeurig over beide verdeeld en beide krijgen brede marges.",
     action: "Gebruik er één, of laat de AI ze samenvoegen tot één kanaal.",
-    chatPrompt:
-      "Twee van mijn spend-kanalen zijn vrijwel identiek volgens het kwaliteitsrapport. Stel een combine-opschoonstap voor die ze samenvoegt tot één kanaal, of adviseer welke ik moet laten vallen.",
   },
   kpi_outlier_weeks: {
     explain:
       "Een extreme uitschieter in de KPI trekt de schattingen van álle kanalen scheef als het model hem aan media probeert toe te schrijven.",
-    action: "Voeg een event-dummy toe voor precies die week (kan in het handmatig-paneel of via de AI).",
-    chatPrompt:
-      "Het kwaliteitsrapport meldt uitschieter-weken in mijn KPI. Stel event-dummy's voor voor precies die weken, met een logische naam per gebeurtenis.",
+    action: "Beschrijf de week aan de architect — die stelt een event-dummy voor precies die week voor.",
   },
   year_end_anomaly: {
     explain:
@@ -99,7 +86,7 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
   control_gaps: {
     explain:
       "Een control-kolom met gaten laat het model niet fitten. Gaten in controls mogen wél gevuld worden — als jij de strategie kiest.",
-    action: "Kies een vulstrategie in de kolom “Gaten vullen” van het handmatig-paneel.",
+    action: "Vertel de architect welke vulstrategie je wilt (bv. doortrekken of interpoleren).",
   },
   no_overlap: {
     explain:
@@ -112,13 +99,11 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
   },
   unparseable_dates: {
     explain: "Rijen met een onleesbare datum zijn overgeslagen — bij veel rijen wijst dit op een afwijkend datumformaat.",
-    action: "Laat de AI het datumformaat forceren",
-    chatPrompt:
-      "Een deel van mijn rijen heeft onleesbare datums. Kijk naar de voorbeeldrijen en stel een parse_date-opschoonstap met het juiste formaat voor.",
+    action: "Vraag de architect het datumformaat te forceren.",
   },
   missing_column: {
     explain: "Het recept verwijst naar een kolom die niet in het bestand staat — vaak een typefout of een gewijzigde export.",
-    action: "Corrigeer de kolomnaam in het handmatig-paneel.",
+    action: "Beschrijf de juiste kolomnaam aan de architect, dan past die het recept aan.",
   },
   window_boundary: {
     explain:

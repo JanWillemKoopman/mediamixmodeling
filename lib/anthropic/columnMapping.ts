@@ -79,19 +79,22 @@ export function buildClassifyRequest(
   fileName: string,
   preview: string,
   profile: SourceProfile | null,
+  // Vrije-tekst correctie van de bouwer op een eerdere classificatie ("kolom X is de KPI,
+  // niet een control") — het tekst-equivalent van het handmatig aanpassen van een dropdown.
+  // Vult gewoon aan op dezelfde user-turn; geen apart gespreks-/toolschema nodig.
+  correction?: string,
 ): Anthropic.MessageCreateParamsNonStreaming {
+  const base = `Bestand "${fileName}".\n\nEerste regels:\n${preview}\n\nStatistisch profiel:\n${formatProfileForClassify(profile)}`;
+  const content = correction
+    ? `${base}\n\nDe gebruiker corrigeert een eerdere classificatie met deze opmerking — pas de indeling hierop aan: "${correction}"`
+    : base;
   return {
     model: CLASSIFY_MODEL,
     max_tokens: 1500,
     tools: [CLASSIFY_TOOL],
     tool_choice: { type: "tool", name: "classify_columns" },
     system: SYSTEM,
-    messages: [
-      {
-        role: "user",
-        content: `Bestand "${fileName}".\n\nEerste regels:\n${preview}\n\nStatistisch profiel:\n${formatProfileForClassify(profile)}`,
-      },
-    ],
+    messages: [{ role: "user", content }],
   };
 }
 
