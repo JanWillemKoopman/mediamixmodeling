@@ -8,7 +8,7 @@ import { ChatWizard } from "@/components/wizard/ChatWizard";
 import { ModelDossier } from "@/components/wizard/ModelDossier";
 import { WizardChatProvider } from "@/components/WizardChatContext";
 import { derivePhase } from "@/lib/wizard/phase";
-import { PHASE_SCRIPT } from "@/lib/wizard/script";
+import { PHASE_SCRIPT, PHASE_STEPS, stepIndexForPhase } from "@/lib/wizard/script";
 import { getHandleidingMarkdown } from "@/lib/handleiding";
 import type { BusinessContextNote, Dataset, Job, JobConfig, ModelRun, Project, SourceFile } from "@/lib/types";
 
@@ -104,10 +104,13 @@ export default async function ProjectDetail({ params }: { params: { id: string }
         <div className="mx-auto grid max-w-[1800px] grid-cols-1 gap-0 px-4 pb-4 pt-3 sm:px-6 lg:grid-cols-[1fr_22rem] lg:gap-6">
           {/* Mobiel/tablet: het dossier is naast de chat verborgen onder lg, dus tonen we het
               hier als inklapbaar paneel bóven de chat — anders mist de bouwer op kleine
-              schermen alle voortgang en de terug-naar-stap-navigatie. */}
+              schermen alle voortgang en de terug-naar-stap-navigatie. "Waar ben ik?" moet
+              ook zonder open te tikken al beantwoord zijn, dus de samenvattingsregel zelf
+              toont altijd het actuele stapnummer + label — alleen het volledige dossier
+              (kolommen, context, resultaten) zit achter de tik. */}
           <details className="mb-3 rounded-2xl border border-border bg-surface-2 lg:hidden">
             <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-fg">
-              Voortgang & dossier
+              Stap {stepIndexForPhase(phase) + 1} van {PHASE_STEPS.length} · {PHASE_SCRIPT[phase].dossierLabel}
             </summary>
             <div className="max-h-[60vh] overflow-y-auto border-t border-border">
               <ModelDossier

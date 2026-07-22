@@ -48,7 +48,7 @@ export function moneyKpis(summary: FitSummary, kpiMargin?: number | null): Money
 // Een PyMC/MCMC-fit kan op twee onafhankelijke manieren "niet goed genoeg" zijn, en die
 // twee vragen hebben een andere remedie:
 //   1. Sampler-betrouwbaarheid — is er wel goed gesampled? (R-hat, ESS, divergenties).
-//      Slecht hier ⇒ terug naar tuning/modelspecificatie (priors, sampler-instellingen).
+//      Slecht hier ⇒ terug naar tuning (priors, rekeninstellingen).
 //   2. Modelfit & plausibiliteit — is de uitkomst inhoudelijk goed? (R², MAPE, dekking,
 //      decompositie). Slecht hier ⇒ terug naar data-inspectie/-voorbereiding (variabelen,
 //      dummy's, uitschieters).

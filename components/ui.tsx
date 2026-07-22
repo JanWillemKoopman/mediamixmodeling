@@ -182,13 +182,25 @@ export function Term({ children, definition }: { children: React.ReactNode; defi
   );
 }
 
-export function TopBar({ email, guideMarkdown }: { email: string | null; guideMarkdown?: string }) {
+export function TopBar({
+  email,
+  guideMarkdown,
+  homeHref = "/projects",
+}: {
+  email: string | null;
+  guideMarkdown?: string;
+  // Waar het logo naartoe linkt. Default "/projects" (bouwerslijst) — maar een klant zonder
+  // builder-rechten die daarop klikt, loopt vast op een "geen toegang"-pagina. Het
+  // klantdashboard geeft hier expliciet zijn eigen route mee, zodat het logo daar nooit een
+  // dead-end is.
+  homeHref?: string;
+}) {
   return (
     // Niet-sticky op mobiel (scrolt gewoon mee — de stappen-nav hieronder blijft daar
     // wél sticky, zie PipelineShell.tsx); vanaf sm weer sticky zoals voorheen.
     <header className="top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-bg/80 px-4 py-3 backdrop-blur sm:sticky sm:px-6">
       <Link
-        href="/projects"
+        href={homeHref}
         className="flex-none text-[15px] font-bold lowercase tracking-tight text-brand-700 transition hover:text-accent"
       >
         media mix modeling

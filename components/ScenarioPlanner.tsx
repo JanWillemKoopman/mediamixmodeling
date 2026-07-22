@@ -364,8 +364,8 @@ export function ScenarioPlanner({ summary, kpiMargin }: { summary: FitSummary; k
           </div>
           {kpiMargin == null && (
             <p className="mt-1.5 text-[11px] text-fg-faint">
-              Vul de gemiddelde marge per {summary.kpi} in (stap 3) voor een netto winst-/verliesberekening van dit
-              scenario.
+              Er is nog geen marge per {summary.kpi} bekend, dus een netto winst-/verliesberekening kan hier niet
+              getoond worden.
             </p>
           )}
           {h > 1 && (

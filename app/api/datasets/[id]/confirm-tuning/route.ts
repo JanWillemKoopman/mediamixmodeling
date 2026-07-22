@@ -5,10 +5,12 @@ import { withJsonErrors } from "@/lib/apiRoute";
 
 // Confirm the parameter-tuning step: persists the tuned model settings (adstock/
 // saturation/priors per channel, baseline priors, trend/seasonality/likelihood — see
-// TuningDraft in lib/types.ts) on the dataset and marks tuning as done, so the wizard's
-// FSM (lib/wizard/phase.ts) can move on to "modelspec" (sampler settings) without losing
-// the tuning choices in between. Only an approved dataset can have its tuning confirmed —
-// tuning is meaningless before there is a definitive column set to tune against.
+// TuningDraft in lib/types.ts) on the dataset and marks tuning as done. The wizard's
+// TuningCard calls this immediately before creating the fit job itself (one click = confirm
+// + start), so nothing else needs to read tuning_confirmed_at to decide the next phase —
+// it stays purely a persisted, auditable fact. Only an approved dataset can have its
+// tuning confirmed — tuning is meaningless before there is a definitive column set to
+// tune against.
 async function handlePost(request: Request, { params }: { params: { id: string } }) {
   const viewer = await getViewer();
   if (!viewer?.isBuilder) {

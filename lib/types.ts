@@ -395,12 +395,12 @@ export interface Dataset {
   prepared_at: string | null;
   approved_at: string | null;
   // Set once the builder has explicitly confirmed the parameter-tuning step (adstock/
-  // saturation/priors per channel, baseline priors, prior-predictive check) — the gate
-  // between the "tuning" and "modelspec" wizard phases.
+  // saturation/priors per channel, baseline priors, prior-predictive check) — persisted
+  // as an auditable fact, alongside the fit job the wizard's TuningCard starts in the
+  // same action (see confirm-tuning/route.ts).
   tuning_confirmed_at: string | null;
-  // The confirmed tuning step's model settings, everything the "modelspec" step needs
-  // EXCEPT kpi/sources/sample (see migration 0017) — read back to assemble the final
-  // JobConfig without losing tuning choices between the two phases.
+  // The confirmed tuning step's model settings, everything the fit job needs EXCEPT
+  // kpi/sources/sample (see migration 0017) — read back to assemble the final JobConfig.
   tuning_draft: TuningDraft | null;
 }
 

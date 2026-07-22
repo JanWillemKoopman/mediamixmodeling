@@ -65,26 +65,22 @@ export const PHASE_SCRIPT: Record<WizardPhase, PhaseScript> = {
   },
   tuning: {
     message:
-      "Nu de belangrijkste stap: parameter-tuning. Voor elk kanaal bepalen we samen wat je vooraf verwacht " +
-      "— niet \"wat is het minimum en maximum\", maar \"wat verwacht je en hoe zeker ben je daarvan\". Dat " +
-      "geldt voor de na-ijl (adstock), de verzadiging, en hoeveel effect je een kanaal toedicht. Onderaan " +
-      "kun je een prior predictive check draaien: een goedkope voorproef die laat zien wat je gekozen priors " +
-      "betekenen voor de omzet, nog vóórdat we echt gaan rekenen.",
-    dossierLabel: "Parameter-tuning (priors)",
-  },
-  modelspec: {
-    message:
-      "De tuning staat vast. Laatste stap vóór het rekenen: de sampler-instellingen (hoeveel chains, " +
-      "samples en tuning-stappen) en een overzicht van alle keuzes tot nu toe. Klopt alles? Dan starten we " +
-      "de berekening.",
-    dossierLabel: "Modelspecificatie",
+      "Nu de belangrijkste stap: het model afstemmen op wat jij al weet. Voor elk kanaal bepalen we samen wat " +
+      "je vooraf verwacht — niet \"wat is het minimum en maximum\", maar \"wat verwacht je en hoe zeker ben je " +
+      "daarvan\". Dat geldt voor de na-ijl (adstock), de verzadiging, en hoeveel effect je een kanaal toedicht. " +
+      "Weet je het niet zeker? Laat dan gerust de AI optimaliseren — de standaardwaarden zijn ook prima. " +
+      "Onderaan kun je eerst een snelle proefdraai doen (geen echte berekening, wel gratis) die laat zien wat " +
+      "je keuzes betekenen voor de omzet. Klopt alles? Dan start de berekening meteen — de rekeninstellingen " +
+      "staan al op geteste standaardwaarden, aan te passen onder \"geavanceerd\" als je dat wilt.",
+    dossierLabel: "Model afstemmen",
   },
   fitting: {
     message:
-      "De berekening loopt: dit is MCMC-sampling, geen simpele regressie, dus het duurt langer — doorgaans " +
-      "3 à 5 minuten. Het model schat per kanaal het effect, de na-ijl en het afnemend rendement, met " +
-      "onzekerheidsmarges. Zodra er een waarschuwing is (bijv. divergenties) zie je die hier zo snel mogelijk.",
-    dossierLabel: "Model berekenen (MCMC)",
+      "De berekening loopt. Dit is een uitgebreide, stapsgewijze berekening — geen simpele optelsom — dus het " +
+      "duurt langer: doorgaans 3 à 5 minuten. Per kanaal wordt geschat: het effect, hoe lang dat doorwerkt, en " +
+      "het afnemend rendement, steeds met een realistische bandbreedte in plaats van één hard getal. Loopt de " +
+      "berekening ergens vast of instabiel, dan zie je die waarschuwing hier zo snel mogelijk.",
+    dossierLabel: "Model wordt berekend",
   },
   fit_failed: {
     message:
@@ -94,10 +90,11 @@ export const PHASE_SCRIPT: Record<WizardPhase, PhaseScript> = {
   },
   review: {
     message:
-      "Klaar! Eerst het belangrijkste: is dit model betrouwbaar genoeg om op te sturen? Hieronder zie je dat " +
-      "in twee lagen — is de sampler goed gesampled, en is de uitkomst inhoudelijk plausibel — met daarna " +
-      "de resultaten zelf (effect en ROAS per kanaal, met onzekerheidsmarges). Niet goed genoeg? Dan kun je " +
-      "gericht terug naar tuning of data. Wel goed genoeg? Dan kun je publiceren naar het klantdashboard.",
+      "Klaar! Eerst het belangrijkste: is dit model betrouwbaar genoeg om te versturen? Hieronder zie je dat " +
+      "in twee stappen — liep de berekening zelf stabiel en betrouwbaar, en is de uitkomst ook inhoudelijk " +
+      "logisch — met daarna de resultaten zelf (effect en rendement per kanaal, met bandbreedte). Niet goed " +
+      "genoeg? Dan kun je gericht terug naar tuning of data. Wel goed genoeg? Dan kun je publiceren naar het " +
+      "klantdashboard.",
     dossierLabel: "Valideren & publiceren",
   },
   published: {
@@ -121,10 +118,9 @@ export const PHASE_STEPS: { phases: WizardPhase[]; label: string; backTarget?: W
     backTarget: "prepare_recipe",
   },
   { phases: ["context"], label: "4. Zakelijke context", backTarget: "context" },
-  { phases: ["tuning"], label: "5. Parameter-tuning", backTarget: "tuning" },
-  { phases: ["modelspec"], label: "6. Modelspecificatie", backTarget: "modelspec" },
-  { phases: ["fitting", "fit_failed"], label: "7. Berekenen" },
-  { phases: ["review", "published"], label: "8. Valideren & publiceren" },
+  { phases: ["tuning"], label: "5. Model afstemmen", backTarget: "tuning" },
+  { phases: ["fitting", "fit_failed"], label: "6. Berekenen" },
+  { phases: ["review", "published"], label: "7. Valideren & publiceren" },
 ];
 
 export function stepIndexForPhase(phase: WizardPhase): number {

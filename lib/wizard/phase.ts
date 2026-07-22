@@ -17,10 +17,10 @@
 //   3. prepare_*           — data voorbereiden (cleaning, verrijking, event-dummy's, features)
 //   4. context             — zakelijke context (prior-elicitatie) vóór er getuned wordt
 //   5. tuning              — parameter-tuning: adstock/saturatie/priors per kanaal, prior
-//                            predictive check — een volwaardige, prominente stap
-//   6. modelspec            — modelspecificatie: sampler-instellingen + bevestiging
-//   7. fitting/fit_failed    — MCMC-sampling laten lopen
-//   8. review/published      — twee-laags validatie (sampler-betrouwbaarheid + modelfit) en
+//                            predictive check, én (geavanceerd, met geteste standaardwaarden)
+//                            de rekeninstellingen — bevestigen start meteen de berekening
+//   6. fitting/fit_failed    — de berekening laten lopen
+//   7. review/published      — twee-laags validatie (sampler-betrouwbaarheid + modelfit) en
 //                             publiceren
 //
 // Terugkoppeling/iteratie ("ga terug naar stap X") is BEWUST geen onderdeel van deze
@@ -41,7 +41,6 @@ export type WizardPhase =
   | "prepare_review" // dataset klaar (prepared) — kwaliteitsrapport beoordelen + goedkeuren
   | "context" // dataset goedgekeurd — zakelijke context vastleggen (overslaanbaar)
   | "tuning" // zakelijke context afgehandeld — parameter-tuning (adstock/saturatie/priors)
-  | "modelspec" // tuning bevestigd — sampler-instellingen + samenvatting, klaar om te draaien
   | "fitting" // fit-job loopt
   | "fit_failed" // laatste fit mislukt — opnieuw
   | "review" // run geslaagd, nog niet gepubliceerd — valideren + publiceren
@@ -97,10 +96,11 @@ export function derivePhase({ sources, dataset, jobs, runs, contextProvided, ski
       // Vóór het tunen: één keer om de zakelijke context vragen (branche, omschrijving,
       // marge) — de belangrijkste input voor priors. Overslaanbaar.
       if (!contextProvided && !skipContext) return "context";
-      // Parameter-tuning is nu een eigen, volwaardige stap; pas als die expliciet
-      // bevestigd is, gaan we door naar sampler-instellingen.
-      if (!dataset.tuning_confirmed_at) return "tuning";
-      return "modelspec";
+      // Tuning bevestigen start in één klik meteen de berekening (zie TuningCard), dus
+      // zodra er een fit-job bestaat is dat hierboven al afgevangen (latestFit). Is er nog
+      // geen fit-job, dan is "tuning" de juiste kaart — ook als een eerdere bevestiging
+      // wél lukte maar het starten van de berekening daarna faalde (retry op dezelfde kaart).
+      return "tuning";
     }
     if (dataset.status === "prepared") return "prepare_review";
     if (dataset.status === "preparing") return "prepare_running";

@@ -26,7 +26,6 @@ import {
   PrepareReviewCard,
   ContextCard,
   TuningCard,
-  ModelSpecCard,
   ReviewCard,
   FitRefineButton,
 } from "@/components/wizard/cards";
@@ -401,8 +400,6 @@ export function ChatWizard({
             onDone={clearOverridePhase}
           />
         ) : null;
-      case "modelspec":
-        return dataset ? <ModelSpecCard projectId={projectId} dataset={dataset} onDone={clearOverridePhase} /> : null;
       case "fit_failed":
         return (
           <div className="rounded-xl border border-danger/40 bg-danger-dim p-4">
@@ -412,7 +409,13 @@ export function ChatWizard({
             </div>
             {dataset && (
               <div className="mt-3">
-                <ModelSpecCard projectId={projectId} dataset={dataset} onDone={clearOverridePhase} />
+                <TuningCard
+                  projectId={projectId}
+                  dataset={dataset}
+                  latestPriorPredictive={latestPriorPredictive}
+                  onAskAi={askAiToOptimize}
+                  onDone={clearOverridePhase}
+                />
               </div>
             )}
           </div>

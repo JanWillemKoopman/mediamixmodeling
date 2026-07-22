@@ -30,9 +30,9 @@ export default async function ProjectsPage() {
 
   // Lichtgewicht voortgangsindicatie per project ("Stap 5 van 8 · parameter-tuning"): een paar
   // kleine batch-queries over alle projecten heen i.p.v. de volledige pipeline-berekening per
-  // project. De nummering volgt exact de 8-staps-wizard (lib/wizard/script.ts PHASE_STEPS),
+  // project. De nummering volgt exact de 7-staps-wizard (lib/wizard/script.ts PHASE_STEPS),
   // zodat de lijst en de wizard dezelfde stap tonen.
-  const TOTAL = 8;
+  const TOTAL = 7;
   const ids = projects.map((p) => p.id);
   const [{ data: srcRows }, { data: dsRows }, { data: jobRows }, { data: runRows }, { data: ctxRows }] = ids.length
     ? await Promise.all([
@@ -83,14 +83,13 @@ export default async function ProjectsPage() {
   function phaseLabel(p: Project): string {
     const fit = latestFitStatus.get(p.id);
     const fitActive = fit === "queued" || fit === "running";
-    if (p.status === "published") return step(8, "gepubliceerd");
-    if (hasRuns.has(p.id)) return fitActive ? step(7, "nieuwe berekening draait") : step(8, "resultaat beoordelen");
-    if (fitActive) return step(7, "berekening draait");
-    if (fit === "failed" || fit === "cancelled") return step(7, "berekening mislukt");
+    if (p.status === "published") return step(7, "gepubliceerd");
+    if (hasRuns.has(p.id)) return fitActive ? step(6, "nieuwe berekening draait") : step(7, "resultaat beoordelen");
+    if (fitActive) return step(6, "berekening draait");
+    if (fit === "failed" || fit === "cancelled") return step(6, "berekening mislukt");
     const ds = latestDataset.get(p.id);
     if (ds?.status === "approved") {
-      if (ds.tuning_confirmed_at) return step(6, "modelspecificatie");
-      if (hasContext.has(p.id) || p.kpi_margin != null) return step(5, "parameter-tuning");
+      if (hasContext.has(p.id) || p.kpi_margin != null) return step(5, "model afstemmen");
       return step(4, "zakelijke context");
     }
     if (ds?.status === "prepared") return step(3, "dataset goedkeuren");

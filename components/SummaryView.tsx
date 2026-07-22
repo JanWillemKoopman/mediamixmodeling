@@ -54,6 +54,9 @@ function Headline({
   kpiMargin?: number | null;
   isCountKpi?: boolean;
 }) {
+  // null op het klant-dashboard — de klant kan de marge niet zelf invullen, dus de tip
+  // hieronder is alleen zinvol (en zichtbaar) voor de bouwer.
+  const chat = useWizardChatOptional();
   const m = moneyKpis(summary, kpiMargin);
   const roasWord = isCountKpi === false ? "omzet per bestede euro" : `${summary.kpi} per bestede euro`;
   return (
@@ -87,10 +90,10 @@ function Headline({
           </>
         )}
       </p>
-      {m.roiPct == null && (
+      {m.roiPct == null && chat && (
         <p className="mt-1.5 text-xs text-fg-muted">
-          Vul de gemiddelde marge per {summary.kpi} in (stap 3) om hier het netto rendement (ROI) in euro&apos;s te
-          zien.
+          Vul de gemiddelde marge per {summary.kpi} in bij de zakelijke context om hier het netto rendement (ROI) in
+          euro&apos;s te zien.
         </p>
       )}
     </div>
@@ -106,7 +109,7 @@ const TRUST_TONE: Record<TrustLevel, string> = {
 // Eén laag van het twee-laags validatieoordeel (blueprint stap 7): sampler-betrouwbaarheid
 // (is het wel goed gesampled?) apart van modelfit & plausibiliteit (is de uitkomst
 // inhoudelijk goed?) — elk met een eigen "terug naar stap X"-knop, want de remedie
-// verschilt: een slechte sampler-diagnostiek los je op in tuning/modelspecificatie, een
+// verschilt: een slechte sampler-diagnostiek los je op in tuning, een
 // slechte inhoudelijke fit los je op in data-inspectie/-voorbereiding.
 function TrustLayer({
   title,
@@ -155,24 +158,23 @@ function TrustLayer({
   );
 }
 
-// Twee-laags modelvalidatie i.p.v. één samengeraapte badge. Elke laag krijgt zijn eigen
-// gerichte "terug"-knop (naar tuning/modelspec bij een sampler-probleem, naar
+// De twee-laags diagnostiek (sampler-betrouwbaarheid + modelfit) — de bouwersweergave, met
+// per laag een gerichte "terug"-knop (naar tuning bij een sampler-probleem, naar
 // inspectie/data-voorbereiding bij een inhoudelijk plausibiliteitsprobleem) via de
-// WizardChatContext-navigatie — alleen zichtbaar in de bouwerswizard (chat != null), nooit
-// op het read-only klantdashboard.
-function TrustBadge({ summary }: { summary: FitSummary }) {
-  const chat = useWizardChatOptional(); // null op het klant-dashboard — geen terugnavigatie daar
+// WizardChatContext-navigatie. `onGoBack` ontbreekt op het klantdashboard (chat == null),
+// waar deze laag-voor-laag weergave sowieso alleen achter "Details" verschijnt (zie
+// TrustBadge hieronder) — de klant heeft niets aan sampler-jargon of een terug-knop naar een
+// wizardstap die hij niet kan openen.
+function TrustLayers({ summary }: { summary: FitSummary }) {
   const { sampler, fit } = layeredTrustVerdict(summary);
   const d = summary.diagnostics;
-
   return (
     <div className="space-y-3">
       <TrustLayer
         title="Laag 1 — Sampler-betrouwbaarheid"
         verdict={sampler}
         explanation="Is het model wel goed gesampled? R-hat rond 1.0, een hoge effectieve steekproef (ESS) en weinig/geen divergenties betekenen: de MCMC-sampler heeft de posterior betrouwbaar verkend."
-        backLabel="Terug naar tuning/modelspecificatie"
-        onGoBack={chat ? () => chat.goToPhase("tuning", "sampler-diagnostiek niet goed genoeg") : undefined}
+        backLabel="Terug naar tuning"
         metrics={
           <>
             <DiagMetric label={<Term definition={MMM_GLOSSARY.rhat}>Max R-hat</Term>} value={fmt(d.max_r_hat, 2)} />
@@ -186,7 +188,6 @@ function TrustBadge({ summary }: { summary: FitSummary }) {
         verdict={fit}
         explanation="Is de uitkomst inhoudelijk goed? R² en MAPE zeggen hoe goed het model de historie volgt; dekking en de decompositie of de opbouw en onzekerheidsmarges kloppen."
         backLabel="Terug naar data-inspectie/-voorbereiding"
-        onGoBack={chat ? () => chat.goToPhase("inspect", "modelfit/plausibiliteit niet goed genoeg") : undefined}
         metrics={
           <>
             <DiagMetric label={<Term definition={MMM_GLOSSARY.r2}>R²</Term>} value={fmt(d.r2, 2)} />
@@ -198,6 +199,76 @@ function TrustBadge({ summary }: { summary: FitSummary }) {
           </>
         }
       />
+    </div>
+  );
+}
+
+const OVERALL_HEADLINE: Record<TrustLevel, string> = {
+  goed: "Betrouwbaar genoeg om op te vertrouwen",
+  let_op: "Bruikbaar, met een paar kanttekeningen",
+  zwak: "Wees voorzichtig met grote besluiten op basis van dit model",
+};
+
+// Vertrouwensoordeel. In de bouwerswizard (chat != null) de volledige twee-laags diagnostiek
+// met terugnavigatie — de bouwer moet weten of hij naar tuning of naar data terug moet. Op
+// het klantdashboard (chat == null) telt vooral "kan ik dit vertrouwen": één helder oordeel,
+// met dezelfde diagnostiek (mét credible intervals — die verdwijnen nergens) toegankelijk
+// achter "Details" voor wie het wil narekenen.
+function TrustBadge({ summary }: { summary: FitSummary }) {
+  const chat = useWizardChatOptional(); // null op het klant-dashboard
+  if (chat) {
+    const { sampler, fit } = layeredTrustVerdict(summary);
+    return (
+      <div className="space-y-3">
+        <TrustLayer
+          title="Laag 1 — Sampler-betrouwbaarheid"
+          verdict={sampler}
+          explanation="Is het model wel goed gesampled? R-hat rond 1.0, een hoge effectieve steekproef (ESS) en weinig/geen divergenties betekenen: de MCMC-sampler heeft de posterior betrouwbaar verkend."
+          backLabel="Terug naar tuning"
+          onGoBack={() => chat.goToPhase("tuning", "sampler-diagnostiek niet goed genoeg")}
+          metrics={
+            <>
+              <DiagMetric label={<Term definition={MMM_GLOSSARY.rhat}>Max R-hat</Term>} value={fmt(summary.diagnostics.max_r_hat, 2)} />
+              <DiagMetric label="Min ESS" value={fmt(summary.diagnostics.min_ess_bulk, 0)} />
+              <DiagMetric label="Divergenties" value={fmt(summary.diagnostics.n_divergences, 0)} />
+            </>
+          }
+        />
+        <TrustLayer
+          title="Laag 2 — Modelfit & plausibiliteit"
+          verdict={fit}
+          explanation="Is de uitkomst inhoudelijk goed? R² en MAPE zeggen hoe goed het model de historie volgt; dekking en de decompositie of de opbouw en onzekerheidsmarges kloppen."
+          backLabel="Terug naar data-inspectie/-voorbereiding"
+          onGoBack={() => chat.goToPhase("inspect", "modelfit/plausibiliteit niet goed genoeg")}
+          metrics={
+            <>
+              <DiagMetric label={<Term definition={MMM_GLOSSARY.r2}>R²</Term>} value={fmt(summary.diagnostics.r2, 2)} />
+              <DiagMetric label={<Term definition={MMM_GLOSSARY.mape}>MAPE</Term>} value={pct(summary.diagnostics.mape)} />
+              <DiagMetric
+                label={<Term definition={MMM_GLOSSARY.coverage}>Dekking (94%)</Term>}
+                value={pct(summary.diagnostics.interval_coverage_94)}
+              />
+            </>
+          }
+        />
+      </div>
+    );
+  }
+
+  const { overall } = layeredTrustVerdict(summary);
+  const dot = overall === "goed" ? "bg-success" : overall === "let_op" ? "bg-warn" : "bg-danger";
+  return (
+    <div className={`rounded-lg border p-3 ${TRUST_TONE[overall]}`}>
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <span className={`h-2.5 w-2.5 flex-none rounded-full ${dot}`} />
+        <span>Modelvertrouwen: {OVERALL_HEADLINE[overall]}</span>
+      </div>
+      <details className="mt-2">
+        <summary className="cursor-pointer select-none text-xs opacity-80">Details (met bandbreedtes en diagnostiek)</summary>
+        <div className="mt-2">
+          <TrustLayers summary={summary} />
+        </div>
+      </details>
     </div>
   );
 }

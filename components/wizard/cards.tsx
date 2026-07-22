@@ -682,28 +682,32 @@ export function InspectCard({
         </div>
 
         {/* Optioneel: geef Claude echt "ogen" op de ruwe data (seizoen, niveaubreuken,
-            multicollineariteit). Zwaardere, expliciet getriggerde stap — geen tokens tot je klikt. */}
-        <div className="border-t border-border pt-3">
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
-            Diepgaande data-inspectie (optioneel)
-          </p>
-          <p className="mb-2 text-xs text-fg-muted">
-            Laat de AI de volledige reeks doorlopen (niet alleen de eerste rijen) en signalen als seizoen,
-            niveaubreuken en sterk samenhangende kanalen benoemen. Handig bij twijfel over de datakwaliteit.
-          </p>
-          {inspectError && <p className="mb-2 text-xs text-danger">{inspectError}</p>}
-          <button onClick={runDeepInspection} disabled={inspecting} className={BTN_SECONDARY}>
-            <Sparkles className="h-4 w-4" />
-            {inspecting ? "Inspectie loopt… (kan even duren)" : inspection ? "Inspectie opnieuw draaien" : "Laat de AI de data inspecteren"}
-          </button>
-          {inspection && <InspectionResultView inspection={inspection} />}
-        </div>
+            multicollineariteit). Zwaardere, expliciet getriggerde stap — geen tokens tot je klikt.
+            Achter een inklap: de meeste bouwers hoeven alleen de kolomrollen te bevestigen, dus
+            deze extra optie mag niet met de primaire "ga door"-knop concurreren. */}
+        <details className="border-t border-border pt-3">
+          <summary className="cursor-pointer select-none text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
+            Twijfel je aan de datakwaliteit? Laat de AI de volledige reeks inspecteren (optioneel)
+          </summary>
+          <div className="mt-2">
+            <p className="mb-2 text-xs text-fg-muted">
+              Doorloopt de hele reeks (niet alleen de eerste rijen) en benoemt signalen als seizoen,
+              niveaubreuken en sterk samenhangende kanalen.
+            </p>
+            {inspectError && <p className="mb-2 text-xs text-danger">{inspectError}</p>}
+            <button onClick={runDeepInspection} disabled={inspecting} className={BTN_SECONDARY}>
+              <Sparkles className="h-4 w-4" />
+              {inspecting ? "Inspectie loopt… (kan even duren)" : inspection ? "Inspectie opnieuw draaien" : "Laat de AI de data inspecteren"}
+            </button>
+            {inspection && <InspectionResultView inspection={inspection} />}
+          </div>
+        </details>
       </div>
 
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
       <div className="mt-3">
         <button onClick={confirm} disabled={busy} className={BTN_PRIMARY}>
-          {busy ? "Bezig…" : "Klopt — ga door naar data voorbereiden"}
+          {busy ? "Bezig…" : "Klopt — ga door"}
         </button>
       </div>
     </Card>
@@ -898,7 +902,7 @@ export function PrepareReviewCard({ dataset }: { dataset: Dataset }) {
       <div className="mt-3">
         <button onClick={approve} disabled={busy} className={BTN_PRIMARY}>
           <Check className="h-4 w-4" />
-          {busy ? "Bezig…" : "Goedkeuren als definitieve dataset"}
+          {busy ? "Bezig…" : "Dataset goedkeuren"}
         </button>
       </div>
     </Card>
@@ -1000,7 +1004,7 @@ export function ContextCard({
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
       <div className="mt-3 flex flex-wrap gap-2">
         <button onClick={save} disabled={busy} className={BTN_PRIMARY}>
-          {busy ? "Opslaan…" : "Opslaan & door naar het model"}
+          {busy ? "Opslaan…" : "Opslaan & doorgaan"}
         </button>
         <button onClick={onSkip} disabled={busy} className={BTN_SECONDARY}>
           Overslaan
@@ -1011,8 +1015,9 @@ export function ContextCard({
 }
 
 // ---------------------------------------------------------------------------
-// Fase "tuning" / "modelspec" — parameter-tuning (priors, per kanaal) en modelspecificatie
-// (sampler-instellingen) als twee opeenvolgende, volwaardige stappen. De AI-optimalisatie
+// Fase "tuning" — parameter-tuning (priors, per kanaal) mét de rekeninstellingen als
+// geavanceerd blok erin: één stap, één klik om te bevestigen én de berekening te starten
+// (de losse "modelspecificatie"-stap van vroeger is hierin opgegaan). De AI-optimalisatie
 // blijft bereikbaar via de vrij-tekst-escape (onAskAi).
 // ---------------------------------------------------------------------------
 
@@ -1149,6 +1154,20 @@ export function TuningCard({
   const [seasonalityOn, setSeasonalityOn] = useState(true);
   const [nFourierModes, setNFourierModes] = useState("");
   const [baselinePriors, setBaselinePriors] = useState<BaselinePriors>({});
+  // Rekeninstellingen — vroeger een eigen "modelspecificatie"-stap, nu gewoon een
+  // geavanceerd blok hier: de standaardwaarden zijn voor vrijwel iedereen prima, dus
+  // "tuning bevestigen" start meteen de berekening in plaats van eerst nog een extra
+  // bevestigingsscherm te tonen.
+  const [draws, setDraws] = useState("1000");
+  const [tune, setTune] = useState("1000");
+  const [chains, setChains] = useState("4");
+  const [targetAccept, setTargetAccept] = useState("");
+  const [crossValidation, setCrossValidation] = useState(false);
+  const [placebo, setPlacebo] = useState(false);
+  function nOrDefault(v: string, fallback: number): number {
+    const parsed = Number(v);
+    return v.trim() !== "" && Number.isFinite(parsed) ? parsed : fallback;
+  }
 
   function setChannel(name: string, patch: Partial<ChannelTuningState>) {
     setChannelTuning((prev) => ({ ...prev, [name]: { ...prev[name], ...patch } }));
@@ -1217,18 +1236,45 @@ export function TuningCard({
     router.refresh();
   }
 
-  async function confirmTuning() {
+  // Eén klik = tuning vastleggen ÉN de berekening starten (voorheen twee aparte stappen
+  // met een tussenliggend "modelspecificatie"-scherm dat vrijwel niemand aanpaste). De
+  // rekeninstellingen staan hieronder als geavanceerd blok met geteste standaardwaarden.
+  async function confirmAndStart() {
     setBusy(true);
     setError(null);
-    const res = await fetch(`/api/datasets/${dataset.id}/confirm-tuning`, {
+    const confirmRes = await fetch(`/api/datasets/${dataset.id}/confirm-tuning`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tuning_draft: modelDraft }),
     });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
+    if (!confirmRes.ok) {
+      const j = await confirmRes.json().catch(() => ({}));
       setBusy(false);
       setError(humanizeError(j.error, "Bevestigen is niet gelukt — probeer het opnieuw.").text);
+      return;
+    }
+    const config: JobConfig = {
+      sources: base.sources,
+      model: { kpi: base.model.kpi, ...modelDraft },
+      sample: {
+        draws: nOrDefault(draws, 1000),
+        tune: nOrDefault(tune, 1000),
+        chains: nOrDefault(chains, 4),
+        ...(targetAccept.trim() !== "" ? { target_accept: nOrDefault(targetAccept, 0.9) } : {}),
+      },
+      ...(crossValidation || placebo
+        ? { evaluation: { ...(crossValidation ? { cross_validation: true } : {}), ...(placebo ? { placebo: true } : {}) } }
+        : {}),
+    };
+    const jobRes = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: projectId, type: "fit", dataset_id: dataset.id, config }),
+    });
+    if (!jobRes.ok) {
+      const j = await jobRes.json().catch(() => ({}));
+      setBusy(false);
+      setError(humanizeError(j.error, "De berekening kon niet gestart worden — probeer het opnieuw.").text);
       return;
     }
     onDone?.();
@@ -1238,11 +1284,22 @@ export function TuningCard({
   return (
     <Card>
       <div className="space-y-4">
-        <p className="rounded-lg border border-border bg-surface-2/40 px-3 py-2 text-xs text-fg-muted">
-          Alle standaardwaarden werken prima — pas alleen aan wat je zeker weet. Het kanaaltype en de vormen
-          hieronder zijn het belangrijkst; de blokken onder “Priors…” zijn optioneel en voor de fijnproevers.
-          Weet je het niet zeker? Klik dan op <span className="font-medium text-fg">Laat de AI optimaliseren</span>.
-        </p>
+        <div className="rounded-lg border border-accent/30 bg-accent-dim/40 p-4">
+          <p className="text-sm text-fg">
+            Niet zeker wat je hier moet instellen? Dat hoeft ook niet — laat de AI naar je data en context kijken en
+            een compleet, onderbouwd voorstel doen. Je keurt het daarna zelf goed.
+          </p>
+          <button onClick={onAskAi} disabled={busy} className={BTN_PRIMARY + " mt-3"}>
+            <Sparkles className="h-4 w-4" />
+            Laat de AI optimaliseren
+          </button>
+        </div>
+
+        <details className="rounded-lg border border-border bg-surface-2/40 px-3 py-2">
+          <summary className="cursor-pointer select-none text-xs font-medium text-fg-muted">
+            Of: zelf instellen per kanaal (geavanceerd)
+          </summary>
+          <div className="mt-3 space-y-4">
         {base.model.channels.map((ch) => {
           const t = channelTuning[ch.name] ?? {};
           const adstock = t.adstock ?? "geometric";
@@ -1427,12 +1484,14 @@ export function TuningCard({
             </div>
           </AdvancedSection>
         </div>
+          </div>
+        </details>
 
         <div className="border-t border-border pt-3">
-          <p className="mb-2 text-sm font-medium text-fg">Prior predictive check</p>
+          <p className="mb-2 text-sm font-medium text-fg">Snelle proefdraai (optioneel)</p>
           <p className="mb-2 text-xs text-fg-muted">
-            Een goedkope voorproef (geen MCMC): wat betekenen deze priors voor het KPI-bereik? Draai 'm voordat je
-            verdergaat naar de echte berekening.
+            Een gratis, snelle voorproef: wat betekenen je huidige keuzes voor de omzet? Handig om te checken
+            vóórdat je de echte (langere) berekening start.
           </p>
           {latestPriorPredictive?.status === "succeeded" && latestPriorPredictive.prior_predictive && (
             <div className="mb-2">
@@ -1447,142 +1506,40 @@ export function TuningCard({
           )}
           {ppError && <p className="mb-2 text-xs text-danger">{ppError}</p>}
           <button onClick={runPriorPredictive} disabled={ppBusy} className={BTN_SECONDARY}>
-            {ppBusy ? "Starten…" : "Draai prior predictive check"}
+            {ppBusy ? "Starten…" : "Draai de proefdraai"}
           </button>
         </div>
-      </div>
 
-      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button onClick={confirmTuning} disabled={busy} className={BTN_PRIMARY}>
-          {busy ? "Bezig…" : "Tuning bevestigen & door naar modelspecificatie"}
-        </button>
-        <button onClick={onAskAi} disabled={busy} className={BTN_SECONDARY}>
-          <Sparkles className="h-4 w-4" />
-          Laat de AI optimaliseren
-        </button>
-      </div>
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Fase "modelspec" — sampler-instellingen + samenvatting van tuning or bevestigde keuzes,
-// en pas hier de daadwerkelijke "fit"-job aanmaken.
-// ---------------------------------------------------------------------------
-
-export function ModelSpecCard({
-  projectId,
-  dataset,
-  onDone,
-}: {
-  projectId: string;
-  dataset: Dataset;
-  onDone?: () => void;
-}) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const base = useMemo(() => templateConfigFromDataset(dataset), [dataset]);
-  const model = dataset.tuning_draft ?? base.model;
-
-  const [draws, setDraws] = useState("1000");
-  const [tune, setTune] = useState("1000");
-  const [chains, setChains] = useState("4");
-  const [targetAccept, setTargetAccept] = useState("");
-  const [crossValidation, setCrossValidation] = useState(false);
-  const [placebo, setPlacebo] = useState(false);
-
-  function n(v: string, fallback: number): number {
-    const parsed = Number(v);
-    return v.trim() !== "" && Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  async function start() {
-    setBusy(true);
-    setError(null);
-    const config: JobConfig = {
-      sources: base.sources,
-      model: { kpi: base.model.kpi, ...model },
-      sample: {
-        draws: n(draws, 1000),
-        tune: n(tune, 1000),
-        chains: n(chains, 4),
-        ...(targetAccept.trim() !== "" ? { target_accept: n(targetAccept, 0.9) } : {}),
-      },
-      ...(crossValidation || placebo
-        ? { evaluation: { ...(crossValidation ? { cross_validation: true } : {}), ...(placebo ? { placebo: true } : {}) } }
-        : {}),
-    };
-    const res = await fetch("/api/jobs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_id: projectId, type: "fit", dataset_id: dataset.id, config }),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setBusy(false);
-      setError(humanizeError(j.error, "De berekening kon niet gestart worden — probeer het opnieuw.").text);
-      return;
-    }
-    onDone?.();
-    router.refresh();
-  }
-
-  return (
-    <Card>
-      <dl className="space-y-1.5 text-sm">
-        <div className="flex justify-between gap-3">
-          <dt className="text-fg-muted">KPI (doel)</dt>
-          <dd className="font-medium text-fg">{base.model.kpi}</dd>
-        </div>
-        <div className="flex justify-between gap-3">
-          <dt className="text-fg-muted">Kanalen</dt>
-          <dd className="text-right text-fg">
-            {model.channels.map((c) => `${c.name} (${c.adstock ?? "geometric"}/${c.saturation ?? "hill"})`).join(", ")}
-          </dd>
-        </div>
-        {model.control_columns && model.control_columns.length > 0 && (
-          <div className="flex justify-between gap-3">
-            <dt className="text-fg-muted">Controls</dt>
-            <dd className="text-right text-fg">{model.control_columns.join(", ")}</dd>
+        <AdvancedSection title="Rekeninstellingen (geavanceerd) — de standaardwaarden werken voor bijna iedereen">
+          <div className="flex flex-wrap gap-3">
+            <NumField label="chains" value={chains} onChange={setChains} width="w-16" />
+            <NumField label="samples (draws)" value={draws} onChange={setDraws} width="w-20" />
+            <NumField label="tuning-stappen" value={tune} onChange={setTune} width="w-20" />
+            <NumField
+              label="target_accept"
+              title="Hoger = kleinere stappen, minder divergenties maar trager."
+              value={targetAccept}
+              onChange={setTargetAccept}
+              width="w-20"
+            />
           </div>
-        )}
-        <div className="flex justify-between gap-3">
-          <dt className="text-fg-muted">Baseline</dt>
-          <dd className="text-right text-fg">
-            trend {model.trend_type ?? "linear"} · seizoen {model.seasonality_periods ? "aan" : "uit"} · ruismodel{" "}
-            {model.likelihood ?? "normal"}
-          </dd>
-        </div>
-      </dl>
-
-      <div className="mt-3 space-y-2 border-t border-border pt-3">
-        <p className="text-xs font-medium text-fg">Sampler-instellingen (MCMC)</p>
-        <div className="flex flex-wrap gap-3">
-          <NumField label="chains" value={chains} onChange={setChains} width="w-16" />
-          <NumField label="samples (draws)" value={draws} onChange={setDraws} width="w-20" />
-          <NumField label="tuning-stappen" value={tune} onChange={setTune} width="w-20" />
-          <NumField label="target_accept" title="Hoger = kleinere stappen, minder divergenties maar trager." value={targetAccept} onChange={setTargetAccept} width="w-20" />
-        </div>
-      </div>
-
-      <div className="mt-3 space-y-1.5 border-t border-border pt-3">
-        <p className="text-xs font-medium text-fg">Extra betrouwbaarheidschecks (optioneel, extra rekentijd)</p>
-        <label className="flex items-center gap-1.5 text-xs text-fg-muted">
-          <input type="checkbox" checked={crossValidation} onChange={(e) => setCrossValidation(e.target.checked)} />
-          Expanding-origin cross-validatie (out-of-sample generalisatie)
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-fg-muted">
-          <input type="checkbox" checked={placebo} onChange={(e) => setPlacebo(e.target.checked)} />
-          Placebo-test
-        </label>
+          <div className="mt-2 space-y-1.5">
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+              <input type="checkbox" checked={crossValidation} onChange={(e) => setCrossValidation(e.target.checked)} />
+              Expanding-origin cross-validatie (extra betrouwbaarheidscheck, extra rekentijd)
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+              <input type="checkbox" checked={placebo} onChange={(e) => setPlacebo(e.target.checked)} />
+              Placebo-test (extra betrouwbaarheidscheck, extra rekentijd)
+            </label>
+          </div>
+        </AdvancedSection>
       </div>
 
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
       <div className="mt-3">
-        <button onClick={start} disabled={busy} className={BTN_PRIMARY}>
-          {busy ? "Starten…" : "Start berekening"}
+        <button onClick={confirmAndStart} disabled={busy} className={BTN_PRIMARY}>
+          {busy ? "Bezig…" : "Start de berekening"}
         </button>
       </div>
     </Card>
@@ -1640,7 +1597,7 @@ export function FitRefineButton({ projectId }: { projectId: string }) {
     <div>
       <button onClick={run} disabled={busy} className={BTN_SECONDARY}>
         <Sparkles className="h-4 w-4" />
-        {busy ? "AI diagnosticeert…" : "Laat de AI dit automatisch diagnosticeren & verbeteren"}
+        {busy ? "AI diagnosticeert…" : "Laat de AI dit verbeteren"}
       </button>
       {status && <p className={`mt-2 rounded-lg border px-3 py-2 text-xs ${toneClass}`}>{status.text}</p>}
     </div>
@@ -1764,10 +1721,10 @@ export function ReviewCard({
         {viewedRun.id === latestRun.id && !viewedIsHierarchical && (
           <div className="border-t border-border pt-4">
             <p className="mb-2 text-sm text-fg-muted">
-              Laat Claude deze uitkomst verder analyseren en op maat gemaakte grafieken maken (kan even duren).
+              Laat de AI deze uitkomst verder analyseren en op maat gemaakte grafieken maken (kan even duren).
             </p>
             <button onClick={generateAnalysis} disabled={analyzing} className={BTN_SECONDARY}>
-              {analyzing ? "Analyse wordt gegenereerd…" : shownAnalysis ? "Analyse opnieuw genereren" : "Genereer diepgaande analyse"}
+              {analyzing ? "Analyse wordt gegenereerd…" : shownAnalysis ? "Analyse opnieuw genereren" : "Analyse genereren"}
             </button>
             {analysisError && <p className="mt-2 text-sm text-danger">{analysisError}</p>}
             {shownAnalysis && <AnalysisView analysis={shownAnalysis} />}
@@ -1777,11 +1734,11 @@ export function ReviewCard({
         {viewedRun.id === latestRun.id && !viewedIsHierarchical && (
           <div className="border-t border-border pt-4">
             <p className="mb-2 text-sm text-fg-muted">
-              Laat Claude een presentatieklare samenvatting in klanttaal schrijven, 1-op-1 te plakken in je rapport of slides.
+              Laat de AI een presentatieklare samenvatting in klanttaal schrijven, 1-op-1 te plakken in je rapport of slides.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={generateClientSummary} disabled={summarizing} className={BTN_SECONDARY}>
-                {summarizing ? "Samenvatting wordt geschreven…" : shownClientSummary ? "Klantsamenvatting opnieuw genereren" : "Schrijf klantsamenvatting"}
+                {summarizing ? "Samenvatting wordt geschreven…" : shownClientSummary ? "Opnieuw genereren" : "Samenvatting schrijven"}
               </button>
               {shownClientSummary && (
                 <button onClick={copySummary} className="rounded-lg border border-border px-3 py-2 text-xs text-fg-muted transition hover:bg-surface-2">
