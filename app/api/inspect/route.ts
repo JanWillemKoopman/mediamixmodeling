@@ -4,7 +4,7 @@ import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildInspectionRequest, parseInspectionResult, INSPECTION_MODEL } from "@/lib/anthropic/dataInspection";
 import type { Dataset, SourceFile } from "@/lib/types";
-import { withJsonErrors } from "@/lib/apiRoute";
+import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
 // Deep data inspection: hand the raw uploads (or the approved master) to Claude in the
 // sandboxed code_execution container and store the structured findings + narrative on
@@ -122,7 +122,7 @@ async function handlePost(request: Request) {
       turn += 1;
     } while (turn <= MAX_CONTINUATIONS);
   } catch (err) {
-    return NextResponse.json({ error: `Claude API-fout: ${(err as Error).message}` }, { status: 502 });
+    return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });
   }
 
   const toolUse = allBlocks.find(

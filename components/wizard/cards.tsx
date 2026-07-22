@@ -29,11 +29,14 @@ import type {
   ClientSummary,
   ColumnMapping,
   ColumnRole,
+  DataInspection,
   Dataset,
   EventDummyConfig,
   FeatureOp,
   FeatureSpec,
   FillStrategy,
+  FitSummary,
+  InspectionFinding,
   Job,
   JobConfig,
   LikelihoodType,
@@ -460,8 +463,38 @@ function columnsOf(source: SourceFile): string[] {
   return [];
 }
 
+// Toont de bevindingen van een diepgaande data-inspectie (Claude in de sandbox): een korte
+// samenvatting plus een lijst met concrete signalen (uitschieters, niveaubreuken, collineariteit…).
+const SEVERITY_STYLE: Record<InspectionFinding["severity"], string> = {
+  belangrijk: "border-danger/40 bg-danger-dim text-danger",
+  let_op: "border-warn/40 bg-warn-dim text-warn",
+  info: "border-border bg-surface-2/60 text-fg-muted",
+};
+
+function InspectionResultView({ inspection }: { inspection: DataInspection }) {
+  if (inspection.error && !inspection.narrative && (!inspection.findings || inspection.findings.length === 0)) {
+    return <p className="mt-2 text-xs text-warn">{inspection.error}</p>;
+  }
+  return (
+    <div className="mt-3 space-y-2">
+      {inspection.narrative && (
+        <div className="rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-xs text-fg">{inspection.narrative}</div>
+      )}
+      {(inspection.findings ?? []).map((f, i) => (
+        <div key={i} className={`rounded-lg border px-3 py-2 text-xs ${SEVERITY_STYLE[f.severity]}`}>
+          <p className="font-medium">
+            {f.column ? `${f.column}: ` : ""}
+            {f.detail}
+          </p>
+          {f.suggestion && <p className="mt-1 opacity-90">Voorstel: {f.suggestion}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function InspectCard({
-  projectId: _projectId,
+  projectId,
   source,
   onDone,
 }: {
@@ -472,8 +505,26 @@ export function InspectCard({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+  const [inspectError, setInspectError] = useState<string | null>(null);
+  const [inspection, setInspection] = useState<DataInspection | null>(null);
 
   const columns = useMemo(() => columnsOf(source), [source]);
+
+  async function runDeepInspection() {
+    setInspecting(true);
+    setInspectError(null);
+    const res = await postJson<{ inspection: DataInspection }>("/api/inspect", {
+      project_id: projectId,
+      scope: "raw",
+    });
+    setInspecting(false);
+    if (!res.ok || !res.data.inspection) {
+      setInspectError(humanizeError(res.error, "De diepgaande inspectie is niet gelukt — probeer het opnieuw.").text);
+      return;
+    }
+    setInspection(res.data.inspection);
+  }
 
   // Beginwaarde per kolom uit de AI-classificatie (mapping) die bij upload draaide.
   const initial = useMemo<Record<string, RoleChoice>>(() => {
@@ -618,11 +669,34 @@ export function InspectCard({
               );
             })}
           </div>
-          {source.mapping && (
+          {source.mapping ? (
             <p className="mt-2 flex items-center gap-1 text-[11px] text-fg-faint">
               <Sparkles className="h-3 w-3" /> Voorgevuld door de AI-kolomherkenning — controleer even.
             </p>
+          ) : (
+            <p className="mt-2 rounded-lg border border-warn/30 bg-warn-dim px-3 py-2 text-[11px] text-warn">
+              De AI-kolomherkenning is niet (of nog niet) beschikbaar. De rollen hieronder zijn automatisch gegokt op
+              basis van de kolomnamen — loop ze extra goed na.
+            </p>
           )}
+        </div>
+
+        {/* Optioneel: geef Claude echt "ogen" op de ruwe data (seizoen, niveaubreuken,
+            multicollineariteit). Zwaardere, expliciet getriggerde stap — geen tokens tot je klikt. */}
+        <div className="border-t border-border pt-3">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
+            Diepgaande data-inspectie (optioneel)
+          </p>
+          <p className="mb-2 text-xs text-fg-muted">
+            Laat de AI de volledige reeks doorlopen (niet alleen de eerste rijen) en signalen als seizoen,
+            niveaubreuken en sterk samenhangende kanalen benoemen. Handig bij twijfel over de datakwaliteit.
+          </p>
+          {inspectError && <p className="mb-2 text-xs text-danger">{inspectError}</p>}
+          <button onClick={runDeepInspection} disabled={inspecting} className={BTN_SECONDARY}>
+            <Sparkles className="h-4 w-4" />
+            {inspecting ? "Inspectie loopt… (kan even duren)" : inspection ? "Inspectie opnieuw draaien" : "Laat de AI de data inspecteren"}
+          </button>
+          {inspection && <InspectionResultView inspection={inspection} />}
         </div>
       </div>
 
@@ -1164,6 +1238,11 @@ export function TuningCard({
   return (
     <Card>
       <div className="space-y-4">
+        <p className="rounded-lg border border-border bg-surface-2/40 px-3 py-2 text-xs text-fg-muted">
+          Alle standaardwaarden werken prima — pas alleen aan wat je zeker weet. Het kanaaltype en de vormen
+          hieronder zijn het belangrijkst; de blokken onder “Priors…” zijn optioneel en voor de fijnproevers.
+          Weet je het niet zeker? Klik dan op <span className="font-medium text-fg">Laat de AI optimaliseren</span>.
+        </p>
         {base.model.channels.map((ch) => {
           const t = channelTuning[ch.name] ?? {};
           const adstock = t.adstock ?? "geometric";
@@ -1511,6 +1590,64 @@ export function ModelSpecCard({
 }
 
 // ---------------------------------------------------------------------------
+// Automatische verbetercyclus (fit): laat de architect een mislukte of warn/fail-fit
+// diagnosticeren en een gecorrigeerde berekening starten. Eén klik = één ronde (max 3);
+// zodra de nieuwe fit klaar is en nog steeds niet goed genoeg, verschijnt de knop opnieuw.
+// Mens-in-de-lus: elke ronde staat in de projectchat en publiceren blijft handmatig.
+// ---------------------------------------------------------------------------
+
+export function FitRefineButton({ projectId }: { projectId: string }) {
+  const router = useRouter();
+  const [round, setRound] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ tone: "info" | "warn" | "success"; text: string } | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setStatus(null);
+    const res = await postJson<{ status?: string; message?: string; reasoning?: string }>("/api/fit-refine", {
+      project_id: projectId,
+      round,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setStatus({ tone: "warn", text: humanizeError(res.error, "De automatische verbetering is niet gelukt.").text });
+      return;
+    }
+    const d = res.data;
+    if (d.status === "refitted") {
+      setRound((r) => r + 1);
+      setStatus({
+        tone: "info",
+        text: d.reasoning
+          ? `Een gecorrigeerde berekening is gestart. ${d.reasoning}`
+          : "Een gecorrigeerde berekening is gestart — je ziet 'm zo bij Berekenen.",
+      });
+      router.refresh();
+    } else {
+      setStatus({ tone: d.status === "done" ? "success" : "warn", text: d.message ?? "Geen verdere verbetering mogelijk." });
+    }
+  }
+
+  const toneClass =
+    status?.tone === "success"
+      ? "border-success/30 bg-success-dim text-success"
+      : status?.tone === "warn"
+        ? "border-warn/30 bg-warn-dim text-warn"
+        : "border-border bg-surface-2/60 text-fg-muted";
+
+  return (
+    <div>
+      <button onClick={run} disabled={busy} className={BTN_SECONDARY}>
+        <Sparkles className="h-4 w-4" />
+        {busy ? "AI diagnosticeert…" : "Laat de AI dit automatisch diagnosticeren & verbeteren"}
+      </button>
+      {status && <p className={`mt-2 rounded-lg border px-3 py-2 text-xs ${toneClass}`}>{status.text}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Fase "review" — resultaten + publiceren.
 // ---------------------------------------------------------------------------
 
@@ -1540,10 +1677,14 @@ export function ReviewCard({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [clientSummary, setClientSummary] = useState<ClientSummary | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   if (runs.length === 0) return null;
 
   const latestRun = runs[0];
+  const latestGate =
+    !isHierSummary(latestRun.summary) ? (latestRun.summary as FitSummary).quality_gate?.verdict ?? null : null;
+  const canAutoRefine = latestGate === "warn" || latestGate === "fail";
   const shownAnalysis = analysis ?? latestRun.analysis;
   const viewedRun = runs.find((r) => r.id === selectedRunId) ?? latestRun;
   const viewedLikelihood = viewedRun.job_id ? jobConfigs?.[viewedRun.job_id]?.model.likelihood : undefined;
@@ -1603,7 +1744,10 @@ export function ReviewCard({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Klembord niet beschikbaar — de tekst staat er toch al.
+      // Klembord niet beschikbaar (bijv. zonder HTTPS/permissie) — laat de bouwer weten dat
+      // hij de tekst hieronder handmatig kan selecteren, i.p.v. stil niets te doen.
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 4000);
     }
   }
 
@@ -1646,11 +1790,26 @@ export function ReviewCard({
               )}
             </div>
             {summaryError && <p className="mt-2 text-sm text-danger">{summaryError}</p>}
+            {copyFailed && (
+              <p className="mt-2 text-xs text-warn">
+                Automatisch kopiëren lukte niet — selecteer de tekst hieronder en kopieer 'm handmatig (Ctrl/Cmd+C).
+              </p>
+            )}
             {shownClientSummary && (
               <div className="mt-3 whitespace-pre-wrap rounded-lg border border-border bg-surface-2 px-4 py-3 text-sm text-fg">
                 {shownClientSummary.text}
               </div>
             )}
+          </div>
+        )}
+
+        {viewedRun.id === latestRun.id && canAutoRefine && (
+          <div className="rounded-lg border border-warn/30 bg-warn-dim/40 p-4">
+            <p className="mb-2 text-sm text-fg">
+              De kwaliteitscontrole staat op {latestGate === "fail" ? "“niet betrouwbaar”" : "“let op”"}. Wil je niet
+              zelf sleutelen? Laat de AI de oorzaak diagnosticeren en meteen een verbeterde berekening starten.
+            </p>
+            <FitRefineButton projectId={projectId} />
           </div>
         )}
 

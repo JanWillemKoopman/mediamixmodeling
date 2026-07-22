@@ -28,6 +28,7 @@ import {
   TuningCard,
   ModelSpecCard,
   ReviewCard,
+  FitRefineButton,
 } from "@/components/wizard/cards";
 import type { Dataset, Job, JobConfig, ModelRun, SourceFile } from "@/lib/types";
 import { Markdown } from "@/components/Markdown";
@@ -60,6 +61,38 @@ interface Turn {
 // system-prompts in lib/anthropic/) — die renderen we dus ook als markdown in plaats van
 // als platte, pre-wrapped tekst. De gebruiker typt zelf geen markdown, dus die bubbel
 // blijft platte tekst met behouden regeleinden.
+// Wachtindicator met verstreken-tijd én stall-detectie: bij een asynchrone stap (samenvoegen
+// of berekenen) toont hij hoelang we al wachten, en na een drempel een escalatiebanner — zodat
+// een vastgelopen worker niet als een eeuwig draaiende spinner zonder signaal verschijnt.
+function WaitingIndicator({ phase, since }: { phase: WizardPhase; since: string | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+  const elapsedMin = since ? Math.max(0, Math.floor((now - new Date(since).getTime()) / 60000)) : 0;
+  const thresholdMin = phase === "fitting" ? 12 : 3;
+  const stalled = since != null && elapsedMin >= thresholdMin;
+  return (
+    <div className="space-y-2">
+      <p className="flex items-center gap-2 text-sm text-fg-faint">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> Bezig…
+        {since && <span>· {elapsedMin === 0 ? "net gestart" : `${elapsedMin} min bezig`}</span>}
+      </p>
+      {stalled && (
+        <div className="rounded-lg border border-warn/30 bg-warn-dim px-3 py-2 text-xs text-warn">
+          Dit duurt langer dan verwacht —{" "}
+          {phase === "fitting"
+            ? "een berekening is meestal binnen ~5 minuten klaar."
+            : "samenvoegen duurt normaal minder dan een minuut."}{" "}
+          De rekenlaag pikt taken normaal vanzelf op. Ververs de pagina; blijft het hangen, controleer dan de
+          worker-status of neem contact op.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Bubble({ role, text }: { role: "user" | "assistant"; text: string }) {
   return (
     <div className={role === "user" ? "flex justify-end" : "flex justify-start"}>
@@ -101,7 +134,17 @@ export function ChatWizard({
   const router = useRouter();
   const { pendingChatMessage, clearPendingChatMessage, overridePhase, overrideReason, clearOverridePhase } =
     useWizardChat();
+  // "Overslaan" bij de zakelijke context bewaren we per project, zodat de stap niet na een
+  // refresh of terugkomst opnieuw opduikt (client-side, geen serverwijziging nodig).
+  const skipKey = `mmm:skipContext:${projectId}`;
   const [skipContext, setSkipContext] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(skipKey) === "1") setSkipContext(true);
+    } catch {
+      // localStorage niet beschikbaar — dan geldt alleen de sessie-state.
+    }
+  }, [skipKey]);
   const naturalPhase: WizardPhase = derivePhase({ sources, dataset, jobs, runs, contextProvided, skipContext });
   // Terugkoppeling/iteratie (blueprint stap 7): een override toont een eerdere fase zonder
   // de deterministische afleiding zelf aan te passen — zie WizardChatContext.goToPhase.
@@ -111,6 +154,16 @@ export function ChatWizard({
   const phase: WizardPhase = overridePhase ?? naturalPhase;
   const source = sources[0] ?? null;
   const latestFailedFit = jobs.find((j) => (j.type === "fit" || j.type === "fit_hierarchical") && j.status === "failed");
+  const activeFitJob = jobs.find(
+    (j) => (j.type === "fit" || j.type === "fit_hierarchical") && (j.status === "queued" || j.status === "running"),
+  );
+  // Startmoment van de lopende async-stap, voor de verstreken-tijd/stall-melding.
+  const waitingSince =
+    naturalPhase === "fitting"
+      ? activeFitJob?.created_at ?? null
+      : naturalPhase === "prepare_running"
+        ? dataset?.created_at ?? null
+        : null;
   const latestPriorPredictive =
     jobs.filter((j) => j.type === "prior_predictive").sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ??
     null;
@@ -327,6 +380,11 @@ export function ChatWizard({
             description={companyDescription}
             kpiMargin={kpiMargin}
             onSkip={() => {
+              try {
+                localStorage.setItem(skipKey, "1");
+              } catch {
+                // Bewaren niet mogelijk — de sessie-state hieronder volstaat voor nu.
+              }
               setSkipContext(true);
               clearOverridePhase();
             }}
@@ -349,6 +407,9 @@ export function ChatWizard({
         return (
           <div className="rounded-xl border border-danger/40 bg-danger-dim p-4">
             <p className="text-sm text-fg">{latestFailedFit?.error ?? "Onbekende fout bij de berekening."}</p>
+            <div className="mt-3">
+              <FitRefineButton projectId={projectId} />
+            </div>
             {dataset && (
               <div className="mt-3">
                 <ModelSpecCard projectId={projectId} dataset={dataset} onDone={clearOverridePhase} />
@@ -393,11 +454,7 @@ export function ChatWizard({
           <div className="flex-1 space-y-3">
             <Bubble role="assistant" text={script.message} />
             {renderCard()}
-            {isWaitingPhase(phase) && (
-              <p className="flex items-center gap-2 text-sm text-fg-faint">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> Bezig…
-              </p>
-            )}
+            {isWaitingPhase(phase) && <WaitingIndicator phase={phase} since={waitingSince} />}
           </div>
         </div>
 

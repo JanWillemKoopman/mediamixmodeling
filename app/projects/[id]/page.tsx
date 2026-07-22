@@ -102,6 +102,29 @@ export default async function ProjectDetail({ params }: { params: { id: string }
       </div>
       <WizardChatProvider>
         <div className="mx-auto grid max-w-[1800px] grid-cols-1 gap-0 px-4 pb-4 pt-3 sm:px-6 lg:grid-cols-[1fr_22rem] lg:gap-6">
+          {/* Mobiel/tablet: het dossier is naast de chat verborgen onder lg, dus tonen we het
+              hier als inklapbaar paneel bóven de chat — anders mist de bouwer op kleine
+              schermen alle voortgang en de terug-naar-stap-navigatie. */}
+          <details className="mb-3 rounded-2xl border border-border bg-surface-2 lg:hidden">
+            <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-fg">
+              Voortgang & dossier
+            </summary>
+            <div className="max-h-[60vh] overflow-y-auto border-t border-border">
+              <ModelDossier
+                phase={phase}
+                projectName={p.name}
+                clientCompany={p.client_company}
+                sources={sourceList}
+                dataset={dataset}
+                jobs={jobList}
+                runs={runsWithAnalysis}
+                industry={industry}
+                businessNotes={businessNotes}
+                companyDescription={companyDescription}
+              />
+            </div>
+          </details>
+
           {/* Linkerkant — de chat-motor. */}
           <div className="flex flex-col">
             <p className="mb-2 text-xs font-medium text-accent">{PHASE_SCRIPT[phase].dossierLabel}</p>

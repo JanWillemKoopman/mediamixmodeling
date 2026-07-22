@@ -402,6 +402,9 @@ export function ScenarioPlanner({ summary, kpiMargin }: { summary: FitSummary; k
             + Bewaar huidig scenario
           </button>
         </div>
+        <p className="mt-1 text-[11px] text-fg-faint">
+          Let op: bewaarde scenario&apos;s staan alleen in dit venster — ververs je de pagina, dan verdwijnen ze.
+        </p>
         {saved.length === 0 ? (
           <p className="mt-2 text-[11px] text-fg-faint">
             Bewaar een paar scenario&apos;s om ze hier — met kosten en verwachte {summary.kpi} per week — naast

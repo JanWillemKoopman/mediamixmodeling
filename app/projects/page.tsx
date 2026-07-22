@@ -28,49 +28,76 @@ export default async function ProjectsPage() {
     .order("created_at", { ascending: false });
   const projects = (data ?? []) as Project[];
 
-  // Lichtgewicht voortgangsindicatie per project ("Stap 4 van 6 · fit draait"): drie kleine
-  // batch-queries over alle projecten heen i.p.v. de volledige pipeline-berekening per
-  // project — genoeg om de lijst als dashboard te laten werken.
+  // Lichtgewicht voortgangsindicatie per project ("Stap 5 van 8 · parameter-tuning"): een paar
+  // kleine batch-queries over alle projecten heen i.p.v. de volledige pipeline-berekening per
+  // project. De nummering volgt exact de 8-staps-wizard (lib/wizard/script.ts PHASE_STEPS),
+  // zodat de lijst en de wizard dezelfde stap tonen.
+  const TOTAL = 8;
   const ids = projects.map((p) => p.id);
-  const [{ data: srcRows }, { data: dsRows }, { data: jobRows }, { data: runRows }] = ids.length
+  const [{ data: srcRows }, { data: dsRows }, { data: jobRows }, { data: runRows }, { data: ctxRows }] = ids.length
     ? await Promise.all([
-        supabase.schema("mmm").from("source_files").select("project_id").in("project_id", ids),
+        supabase.schema("mmm").from("source_files").select("project_id, inspection_confirmed_at").in("project_id", ids),
         supabase
           .schema("mmm")
           .from("datasets")
-          .select("project_id, status, created_at")
+          .select("project_id, status, tuning_confirmed_at, created_at")
           .in("project_id", ids)
           .order("created_at", { ascending: false }),
         supabase
           .schema("mmm")
           .from("jobs")
-          .select("project_id, type, status")
+          .select("project_id, type, status, created_at")
           .in("project_id", ids)
           .in("type", ["fit", "fit_hierarchical"])
-          .in("status", ["queued", "running"]),
+          .order("created_at", { ascending: false }),
         supabase.schema("mmm").from("model_runs").select("project_id").in("project_id", ids),
+        supabase.schema("mmm").from("project_context").select("project_id, industry, description, notes").in("project_id", ids),
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }];
+    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
+  const inspectionConfirmed = new Set(
+    ((srcRows ?? []) as { project_id: string; inspection_confirmed_at: string | null }[])
+      .filter((r) => r.inspection_confirmed_at)
+      .map((r) => r.project_id),
+  );
   const hasSources = new Set((srcRows ?? []).map((r) => r.project_id as string));
-  const latestDatasetStatus = new Map<string, string>();
-  for (const r of (dsRows ?? []) as { project_id: string; status: string }[]) {
-    if (!latestDatasetStatus.has(r.project_id)) latestDatasetStatus.set(r.project_id, r.status);
+  const latestDataset = new Map<string, { status: string; tuning_confirmed_at: string | null }>();
+  for (const r of (dsRows ?? []) as { project_id: string; status: string; tuning_confirmed_at: string | null }[]) {
+    if (!latestDataset.has(r.project_id)) latestDataset.set(r.project_id, { status: r.status, tuning_confirmed_at: r.tuning_confirmed_at });
   }
-  const hasActiveFit = new Set((jobRows ?? []).map((r) => r.project_id as string));
+  const latestFitStatus = new Map<string, string>();
+  for (const r of (jobRows ?? []) as { project_id: string; status: string }[]) {
+    if (!latestFitStatus.has(r.project_id)) latestFitStatus.set(r.project_id, r.status);
+  }
   const hasRuns = new Set((runRows ?? []).map((r) => r.project_id as string));
+  const hasContext = new Set(
+    ((ctxRows ?? []) as { project_id: string; industry: string | null; description: string | null; notes: unknown[] | null }[])
+      .filter((r) => r.industry || r.description || (Array.isArray(r.notes) && r.notes.length > 0))
+      .map((r) => r.project_id),
+  );
+
+  function step(n: number, label: string): string {
+    return `Stap ${n} van ${TOTAL} · ${label}`;
+  }
 
   function phaseLabel(p: Project): string {
-    if (p.status === "published") return "Stap 6 van 6 · gepubliceerd";
-    if (hasRuns.has(p.id)) return hasActiveFit.has(p.id) ? "Stap 6 van 6 · nieuwe fit draait" : "Stap 6 van 6 · resultaat beoordelen";
-    if (hasActiveFit.has(p.id)) return "Stap 5 van 6 · fit draait";
-    const ds = latestDatasetStatus.get(p.id);
-    if (ds === "approved") return "Stap 4 van 6 · model configureren";
-    if (ds === "prepared") return "Stap 3 van 6 · dataset goedkeuren";
-    if (ds === "preparing") return "Stap 3 van 6 · samenvoegen loopt";
-    if (ds === "failed") return "Stap 3 van 6 · samenvoegen mislukt";
-    if (hasSources.has(p.id)) return p.eda_completed_at ? "Stap 3 van 6 · data voorbereiden" : "Stap 2 van 6 · data verkennen";
-    return "Stap 1 van 6 · data uploaden";
+    const fit = latestFitStatus.get(p.id);
+    const fitActive = fit === "queued" || fit === "running";
+    if (p.status === "published") return step(8, "gepubliceerd");
+    if (hasRuns.has(p.id)) return fitActive ? step(7, "nieuwe berekening draait") : step(8, "resultaat beoordelen");
+    if (fitActive) return step(7, "berekening draait");
+    if (fit === "failed" || fit === "cancelled") return step(7, "berekening mislukt");
+    const ds = latestDataset.get(p.id);
+    if (ds?.status === "approved") {
+      if (ds.tuning_confirmed_at) return step(6, "modelspecificatie");
+      if (hasContext.has(p.id) || p.kpi_margin != null) return step(5, "parameter-tuning");
+      return step(4, "zakelijke context");
+    }
+    if (ds?.status === "prepared") return step(3, "dataset goedkeuren");
+    if (ds?.status === "preparing") return step(3, "samenvoegen loopt");
+    if (ds?.status === "failed") return step(3, "samenvoegen mislukt");
+    if (hasSources.has(p.id)) return inspectionConfirmed.has(p.id) ? step(3, "data voorbereiden") : step(2, "data-inspectie");
+    return step(1, "data uploaden");
   }
 
   return (

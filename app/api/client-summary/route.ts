@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { buildClientSummaryRequest } from "@/lib/anthropic/clientSummary";
 import { isHierSummary } from "@/lib/types";
 import type { ClientSummary, FitSummary } from "@/lib/types";
-import { withJsonErrors } from "@/lib/apiRoute";
+import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
 export const maxDuration = 60;
 
@@ -51,7 +51,7 @@ async function handlePost(request: Request) {
   try {
     response = await client.messages.create(params);
   } catch (err) {
-    return NextResponse.json({ error: `Claude API-fout: ${(err as Error).message}` }, { status: 502 });
+    return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });
   }
 
   const text = response.content

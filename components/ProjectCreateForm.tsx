@@ -18,18 +18,27 @@ export function ProjectCreateForm() {
     setError(null);
     const supabase = createClient();
     const { data: userData } = await supabase.auth.getUser();
-    const { error } = await supabase
+    const { data: created, error } = await supabase
       .schema("mmm")
       .from("projects")
-      .insert({ name, client_company: company || null, created_by: userData.user?.id });
-    setBusy(false);
+      .insert({ name, client_company: company || null, created_by: userData.user?.id })
+      .select("id")
+      .single();
     if (error) {
+      setBusy(false);
       setError(humanizeError(error.message, "Het project kon niet worden aangemaakt — probeer het opnieuw.").text);
       return;
     }
     setName("");
     setCompany("");
-    router.refresh();
+    // Direct de nieuwe wizard in — net als de demo-knop — i.p.v. de bouwer het project in de
+    // lijst te laten terugzoeken.
+    if (created?.id) {
+      router.push(`/projects/${created.id}`);
+    } else {
+      setBusy(false);
+      router.refresh();
+    }
   }
 
   return (

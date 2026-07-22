@@ -4,7 +4,7 @@ import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildDeepAnalysisRequest } from "@/lib/anthropic/deepAnalysis";
 import type { AnalysisChart, FitSummary, RunAnalysis } from "@/lib/types";
-import { withJsonErrors } from "@/lib/apiRoute";
+import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
 // Deep-analysis generation may run several server-tool (code_execution) iterations
 // inside one turn — comfortably longer than a normal chat round trip. Give the route
@@ -93,7 +93,7 @@ async function handlePost(request: Request) {
       turn += 1;
     } while (turn <= MAX_CONTINUATIONS);
   } catch (err) {
-    return NextResponse.json({ error: `Claude API-fout: ${(err as Error).message}` }, { status: 502 });
+    return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });
   }
 
   const charts: AnalysisChart[] = [];

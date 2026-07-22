@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withJsonErrors } from "@/lib/apiRoute";
+import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 import Anthropic from "@anthropic-ai/sdk";
 import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -91,7 +91,7 @@ async function handlePost(request: Request) {
       ),
     );
   } catch (err) {
-    return NextResponse.json({ error: `Claude API-fout: ${(err as Error).message}` }, { status: 502 });
+    return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });
   }
 
   // De onderbouwing van de architect (vrije tekst naast het toolgebruik) — dit is de

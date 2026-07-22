@@ -329,23 +329,27 @@ export default async function Home() {
       </section>
 
       {/* ─── Video walkthrough ─────────────────────────────────────────────────── */}
-      <section id="video" className="border-y border-border bg-surface-2/50">
-        <div className="mx-auto max-w-4xl px-5 py-16 sm:px-8 sm:py-20">
-          <div className="text-center">
-            <SectionEyebrow>Product walkthrough</SectionEyebrow>
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">
-              Zie de volledige app in actie
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-fg-muted">
-              Een korte doorloop van de hele wizard — van ruwe CSV&apos;s tot een
-              gepubliceerd klantdashboard met budgetadvies.
-            </p>
+      {/* Alleen tonen zodra er echt een video is; een lege "binnenkort"-placeholder op de
+          landingspagina wekt geen vertrouwen. Zet YOUTUBE_VIDEO_ID hierboven om te activeren. */}
+      {YOUTUBE_VIDEO_ID && (
+        <section id="video" className="border-y border-border bg-surface-2/50">
+          <div className="mx-auto max-w-4xl px-5 py-16 sm:px-8 sm:py-20">
+            <div className="text-center">
+              <SectionEyebrow>Product walkthrough</SectionEyebrow>
+              <h2 className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">
+                Zie de volledige app in actie
+              </h2>
+              <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-fg-muted">
+                Een korte doorloop van de hele wizard — van ruwe CSV&apos;s tot een
+                gepubliceerd klantdashboard met budgetadvies.
+              </p>
+            </div>
+            <div className="mt-8">
+              <LandingVideo videoId={YOUTUBE_VIDEO_ID} />
+            </div>
           </div>
-          <div className="mt-8">
-            <LandingVideo videoId={YOUTUBE_VIDEO_ID || null} />
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ─── Architectuur / tech showcase ──────────────────────────────────────── */}
       <section id="architectuur" className="mx-auto max-w-6xl px-5 py-16 sm:px-8 sm:py-20">

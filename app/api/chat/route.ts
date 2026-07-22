@@ -7,7 +7,7 @@ import type { ArchitectFitContext } from "@/lib/anthropic/fitContext";
 import type { ArchitectDatasetContext } from "@/lib/anthropic/datasetContext";
 import { isHierSummary } from "@/lib/types";
 import type { DataInspection, Dataset, FitSummary, JobConfig, JobStatus, PriorPredictiveReview, ProjectContext, SourceFile } from "@/lib/types";
-import { withJsonErrors } from "@/lib/apiRoute";
+import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
 // Tool names the architect can call — kept here so the route and the frontend agree on
 // what a "proposal" in the persisted/returned payload means. record_business_context is a
@@ -370,7 +370,7 @@ async function handlePost(request: Request) {
           usage: response.usage,
         });
       } catch (err) {
-        send({ type: "error", error: `Claude API-fout: ${(err as Error).message}` });
+        send({ type: "error", error: claudeErrorMessage(err) });
       } finally {
         try {
           controller.close();

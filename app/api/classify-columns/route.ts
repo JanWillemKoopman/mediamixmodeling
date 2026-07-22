@@ -4,7 +4,7 @@ import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildClassifyRequest, parseColumnMapping } from "@/lib/anthropic/columnMapping";
 import type { SourceProfile } from "@/lib/types";
-import { withJsonErrors } from "@/lib/apiRoute";
+import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
 // Cheap, one-shot column-semantics classification for a single uploaded source file. Called
 // fire-and-forget from SourceUpload.tsx right after a CSV is inserted; the result is cached
@@ -47,7 +47,7 @@ async function handlePost(request: Request) {
       buildClassifyRequest(file.name as string, file.preview as string, (file.profile as SourceProfile | null) ?? null),
     );
   } catch (err) {
-    return NextResponse.json({ error: `Claude API-fout: ${(err as Error).message}` }, { status: 502 });
+    return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });
   }
 
   const toolUse = response.content.find(

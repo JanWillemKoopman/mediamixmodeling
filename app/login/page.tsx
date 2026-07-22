@@ -22,7 +22,10 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (error) {
-      setError(humanizeAuthError(error.message));
+      const base = humanizeAuthError(error.message);
+      // Veel accounts hebben (nog) geen wachtwoord ingesteld — wijs de gebruiker actief naar
+      // de magische link i.p.v. ze te laten vastlopen op een wachtwoordfout.
+      setError(`${base} Geen wachtwoord ingesteld? Gebruik hieronder de magische inloglink.`);
       return;
     }
     router.push("/projects");
