@@ -283,6 +283,7 @@ export interface DataInspection {
   narrative: string | null;
   model: string | null;
   error: string | null;
+  status: "running" | "done" | "error";
   created_at: string;
 }
 
