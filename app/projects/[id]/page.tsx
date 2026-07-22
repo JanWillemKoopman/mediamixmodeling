@@ -131,7 +131,7 @@ export default async function ProjectDetail({ params }: { params: { id: string }
           {/* Linkerkant — de chat-motor. */}
           <div className="flex flex-col">
             <p className="mb-2 text-xs font-medium text-accent">{PHASE_SCRIPT[phase].dossierLabel}</p>
-            <div className="flex h-[calc(100vh-8rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface-1">
+            <div className="flex h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface-1">
             <ChatWizard
               projectId={p.id}
               sources={sourceList}
@@ -148,7 +148,7 @@ export default async function ProjectDetail({ params }: { params: { id: string }
           </div>
 
           {/* Rechterkant — read-only model-dossier. */}
-          <aside className="hidden h-[calc(100vh-8rem)] overflow-hidden rounded-2xl border border-border bg-surface-2 lg:block">
+          <aside className="hidden h-[calc(100dvh-8rem)] overflow-hidden rounded-2xl border border-border bg-surface-2 lg:block">
             <ModelDossier
               phase={phase}
               projectName={p.name}

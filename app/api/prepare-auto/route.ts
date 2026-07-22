@@ -59,6 +59,7 @@ async function handlePost(request: Request) {
       .from("data_inspections")
       .select("*")
       .eq("project_id", projectId)
+      .eq("status", "done")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),

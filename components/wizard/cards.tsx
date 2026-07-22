@@ -4,7 +4,7 @@
 // fase van de deterministische wizard-FSM. Ze roepen de bestaande API-routes aan (upload,
 // /api/datasets, approve, /api/jobs, publish) — de zware backend blijft ongewijzigd.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Papa from "papaparse";
 import { Upload, Trash2, Check, Sparkles } from "lucide-react";
@@ -511,6 +511,18 @@ export function InspectCard({
 
   const columns = useMemo(() => columnsOf(source), [source]);
 
+  // De inspectie zelf draait server-side op de achtergrond (kan minuten duren) — de POST
+  // hierbeneden antwoordt meteen met een 'running'-rij en we volgen de voortgang door te
+  // pollen, in plaats van op één lang openstaande fetch te wachten. Dat laatste viel op
+  // mobiel netwerk regelmatig weg (verbinding verbroken door de telefoon/browser, niet
+  // door de server), wat als "Geen verbinding met de server" verscheen.
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
   async function runDeepInspection() {
     setInspecting(true);
     setInspectError(null);
@@ -518,12 +530,36 @@ export function InspectCard({
       project_id: projectId,
       scope: "raw",
     });
-    setInspecting(false);
     if (!res.ok || !res.data.inspection) {
+      setInspecting(false);
       setInspectError(humanizeError(res.error, "De diepgaande inspectie is niet gelukt — probeer het opnieuw.").text);
       return;
     }
-    setInspection(res.data.inspection);
+    const inspectionId = res.data.inspection.id;
+    const supabase = createClient();
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const { data } = await supabase
+        .schema("mmm")
+        .from("data_inspections")
+        .select("*")
+        .eq("id", inspectionId)
+        .maybeSingle();
+      const row = data as DataInspection | null;
+      if (!row || row.status === "running") return;
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      setInspecting(false);
+      if (row.status === "error") {
+        setInspectError(
+          humanizeError(row.error, "De diepgaande inspectie is niet gelukt — probeer het opnieuw.").text,
+        );
+      } else {
+        setInspection(row);
+      }
+    }, 3000);
   }
 
   // Beginwaarde per kolom uit de AI-classificatie (mapping) die bij upload draaide.
