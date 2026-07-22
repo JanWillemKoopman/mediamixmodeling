@@ -1,6 +1,14 @@
 // Fase "inspect" — data-inspectie & kolomherkenning, puur als tekst. De AI-classificatie
 // (die al bij upload draaide) wordt samengevat in lopende tekst; de bouwer bevestigt of
 // corrigeert met een genummerd menu i.p.v. per-kolom dropdowns.
+//
+// De diepe inspectie (optie 3) is een minutenlange achtergrondtaak op de server
+// (app/api/inspect/route.ts, waitUntil). De uitkomst wordt NOOIT via een client-side timer
+// gepolld — zo'n timer overleeft een achtergrondgezette mobiele tab niet, waardoor de chat
+// stil bleef hangen terwijl de inspectie allang klaar was. In plaats daarvan is
+// `latestInspection` server-side opgehaald (app/projects/[id]/page.tsx) en via Realtime
+// bijgewerkt (ChatWizard's data_inspections-subscriptie) — de intro-tekst leest 'm gewoon
+// uit, net als dataset/jobs/runs.
 
 import { createClient } from "@/lib/supabase/client";
 import { humanizeError } from "@/lib/humanizeMessage";
@@ -47,6 +55,19 @@ function formatMappingSummary(mapping: ColumnMapping | null, source: SourceFile)
   return lines.join("\n");
 }
 
+function formatInspectionResult(row: DataInspection): string {
+  if (row.status === "running") return "_Ik ben de data nog aan het inspecteren — dat kan nog even duren._";
+  if (row.status === "error") {
+    return humanizeError(row.error, "De diepgaande inspectie is niet gelukt — probeer het opnieuw.").text;
+  }
+  const parts: string[] = [];
+  if (row.narrative) parts.push(row.narrative);
+  for (const f of row.findings ?? []) {
+    parts.push(`- ${f.column ? `${f.column}: ` : ""}${f.detail}${f.suggestion ? ` (voorstel: ${f.suggestion})` : ""}`);
+  }
+  return parts.join("\n") || "Geen bijzonderheden gevonden.";
+}
+
 const INSPECT_OPTIONS: MenuOption[] = [
   { key: "confirm", label: "Klopt, ga door", synonyms: ["klopt", "ja", "ga door", "confirm", "goed"] },
   { key: "correct", label: "Ik wil iets aanpassen", synonyms: ["aanpassen", "wijzigen", "nee", "klopt niet"] },
@@ -59,7 +80,10 @@ const INSPECT_OPTIONS: MenuOption[] = [
 
 export function intro(env: TurnEnv): string {
   if (!env.source) return "";
-  return `${formatMappingSummary(env.source.mapping, env.source)}\n\n${formatMenu(INSPECT_OPTIONS)}`;
+  const parts = [formatMappingSummary(env.source.mapping, env.source)];
+  if (env.latestInspection) parts.push(formatInspectionResult(env.latestInspection));
+  parts.push(formatMenu(INSPECT_OPTIONS));
+  return parts.join("\n\n");
 }
 
 function validMapping(mapping: ColumnMapping | null): string | null {
@@ -71,32 +95,6 @@ function validMapping(mapping: ColumnMapping | null): string | null {
   if (kpiCount !== 1) return "Ik zie niet precies één KPI-kolom — beschrijf welke kolom je doel is (optie 2).";
   if (spendCount === 0) return "Ik zie nog geen enkel kanaal (uitgaven-kolom) — beschrijf welke kolommen dat zijn (optie 2).";
   return null;
-}
-
-async function runDeepInspection(env: TurnEnv): Promise<void> {
-  const res = await postJson<{ inspection: DataInspection }>("/api/inspect", { project_id: env.projectId, scope: "raw" });
-  if (!res.ok || !res.data.inspection) {
-    env.pushMessage(humanizeError(res.error, "De diepgaande inspectie is niet gelukt — probeer het opnieuw.").text);
-    return;
-  }
-  const inspectionId = res.data.inspection.id;
-  const supabase = createClient();
-  const poll = setInterval(async () => {
-    const { data } = await supabase.schema("mmm").from("data_inspections").select("*").eq("id", inspectionId).maybeSingle();
-    const row = data as DataInspection | null;
-    if (!row || row.status === "running") return;
-    clearInterval(poll);
-    if (row.status === "error") {
-      env.pushMessage(humanizeError(row.error, "De diepgaande inspectie is niet gelukt — probeer het opnieuw.").text);
-      return;
-    }
-    const parts: string[] = [];
-    if (row.narrative) parts.push(row.narrative);
-    for (const f of row.findings ?? []) {
-      parts.push(`- ${f.column ? `${f.column}: ` : ""}${f.detail}${f.suggestion ? ` (voorstel: ${f.suggestion})` : ""}`);
-    }
-    env.pushMessage((parts.join("\n") || "Geen bijzonderheden gevonden.") + `\n\n${formatMenu(INSPECT_OPTIONS)}`);
-  }, 3000);
 }
 
 export async function resolve(env: TurnEnv, reply: string): Promise<TurnReplyResult> {
@@ -148,10 +146,17 @@ export async function resolve(env: TurnEnv, reply: string): Promise<TurnReplyRes
   }
 
   if (match.key === "deep") {
-    void runDeepInspection(env);
+    if (env.latestInspection?.status === "running") {
+      return { handled: true, reply: "Ik ben al bezig met een inspectie — dat verschijnt hierboven zodra ik klaar ben." };
+    }
+    const res = await postJson<{ inspection: DataInspection }>("/api/inspect", { project_id: env.projectId, scope: "raw" });
+    if (!res.ok || !res.data.inspection) {
+      return { handled: true, reply: humanizeError(res.error, "De diepgaande inspectie kon niet gestart worden — probeer het opnieuw.").text };
+    }
     return {
       handled: true,
-      reply: "Ik inspecteer de volledige reeks — dat kan een paar minuten duren, ik laat het hier weten zodra ik klaar ben.",
+      refresh: true,
+      reply: "Ik inspecteer de volledige reeks — dat kan een paar minuten duren. De uitkomst verschijnt hierboven zodra ik klaar ben (ook als je de pagina intussen sluit).",
     };
   }
 

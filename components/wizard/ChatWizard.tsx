@@ -39,7 +39,7 @@ import { SummaryView } from "@/components/SummaryView";
 import { HierarchicalSummaryView } from "@/components/HierarchicalSummaryView";
 import { AnalysisView } from "@/components/AnalysisView";
 import { isHierSummary } from "@/lib/types";
-import type { Dataset, Job, JobConfig, ModelRun, SourceFile } from "@/lib/types";
+import type { DataInspection, Dataset, Job, JobConfig, ModelRun, SourceFile } from "@/lib/types";
 import { Markdown } from "@/components/Markdown";
 
 // Wat de architect op dit moment aan het doen is — puur voor de statusindicator, geen
@@ -157,6 +157,7 @@ export function ChatWizard({
   industry,
   companyDescription,
   contextProvided,
+  latestInspection,
 }: {
   projectId: string;
   sources: SourceFile[];
@@ -168,6 +169,7 @@ export function ChatWizard({
   industry: string | null;
   companyDescription: string | null;
   contextProvided: boolean;
+  latestInspection: DataInspection | null;
 }) {
   const router = useRouter();
   const { pendingChatMessage, clearPendingChatMessage, overridePhase, overrideReason, clearOverridePhase, goToPhase, reuseJobConfig, setReuseJobConfig, clearReuseJobConfig } =
@@ -221,7 +223,7 @@ export function ChatWizard({
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase.channel(`wizard-${projectId}`);
-    for (const table of ["datasets", "jobs", "model_runs"] as const) {
+    for (const table of ["datasets", "jobs", "model_runs", "data_inspections"] as const) {
       channel.on(
         "postgres_changes",
         { event: "*", schema: "mmm", table, filter: `project_id=eq.${projectId}` },
@@ -263,6 +265,7 @@ export function ChatWizard({
     runs,
     jobConfigs,
     kpiMargin,
+    latestInspection,
     phaseState,
     setPhaseState,
     reuseJobConfig,

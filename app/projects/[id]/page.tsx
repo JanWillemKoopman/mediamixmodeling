@@ -10,7 +10,7 @@ import { WizardChatProvider } from "@/components/WizardChatContext";
 import { derivePhase } from "@/lib/wizard/phase";
 import { PHASE_SCRIPT, PHASE_STEPS, stepIndexForPhase } from "@/lib/wizard/script";
 import { getHandleidingMarkdown } from "@/lib/handleiding";
-import type { BusinessContextNote, Dataset, Job, JobConfig, ModelRun, Project, SourceFile } from "@/lib/types";
+import type { BusinessContextNote, DataInspection, Dataset, Job, JobConfig, ModelRun, Project, SourceFile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +29,7 @@ export default async function ProjectDetail({ params }: { params: { id: string }
   if (!project) notFound();
   const p = project as Project;
 
-  const [{ data: sources }, { data: jobs }, { data: runs }, { data: datasets }, { data: projectContext }] =
+  const [{ data: sources }, { data: jobs }, { data: runs }, { data: datasets }, { data: projectContext }, { data: inspections }] =
     await Promise.all([
       supabase.schema("mmm").from("source_files").select("*").eq("project_id", p.id).order("created_at"),
       supabase.schema("mmm").from("jobs").select("*").eq("project_id", p.id).order("created_at", { ascending: false }),
@@ -56,6 +56,16 @@ export default async function ProjectDetail({ params }: { params: { id: string }
         .select("industry, notes, description")
         .eq("project_id", p.id)
         .maybeSingle(),
+      // Nieuwste diepe data-inspectie (kan nog 'running' zijn) — server-side opgehaald en
+      // via Realtime bijgewerkt, zodat de uitkomst altijd verschijnt zodra de achtergrondtaak
+      // klaar is, ook als een client-side timer (mobiel, tab op de achtergrond) het niet haalt.
+      supabase
+        .schema("mmm")
+        .from("data_inspections")
+        .select("*")
+        .eq("project_id", p.id)
+        .order("created_at", { ascending: false })
+        .limit(1),
     ]);
 
   const sourceList = (sources ?? []) as SourceFile[];
@@ -88,6 +98,8 @@ export default async function ProjectDetail({ params }: { params: { id: string }
   const jobConfigById = Object.fromEntries(
     jobList.filter((j) => j.type === "fit" || j.type === "fit_hierarchical").map((j) => [j.id, j.config]),
   ) as Record<string, JobConfig>;
+
+  const latestInspection = ((inspections ?? []) as DataInspection[])[0] ?? null;
 
   const contextProvided =
     Boolean(industry) || Boolean(companyDescription) || businessNotes.length > 0 || p.kpi_margin != null;
@@ -144,6 +156,7 @@ export default async function ProjectDetail({ params }: { params: { id: string }
               industry={industry}
               companyDescription={companyDescription}
               contextProvided={contextProvided}
+              latestInspection={latestInspection}
             />
             </div>
           </div>

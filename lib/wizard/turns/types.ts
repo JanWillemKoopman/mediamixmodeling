@@ -9,7 +9,7 @@
 // ChatWizard het bericht gewoon doorstuurt naar de architect (`/api/chat`) — precies zoals
 // vrij typen vandaag al werkt.
 
-import type { Dataset, Job, JobConfig, ModelRun, SourceFile } from "@/lib/types";
+import type { DataInspection, Dataset, Job, JobConfig, ModelRun, SourceFile } from "@/lib/types";
 import type { WizardPhase } from "@/lib/wizard/phase";
 
 export interface TurnReplyResult {
@@ -33,6 +33,11 @@ export interface TurnEnv {
   runs: ModelRun[];
   jobConfigs: Record<string, JobConfig>;
   kpiMargin: number | null;
+  // Nieuwste diepe data-inspectie (server-side opgehaald, via Realtime bijgewerkt) — puur
+  // gelezen, nooit client-side gepolld: zo verschijnt de uitkomst altijd zodra de
+  // achtergrondtaak klaar is, ook als de client een tijdje niet actief was (mobiel, tab op
+  // de achtergrond).
+  latestInspection: DataInspection | null;
   // Klein stukje fase-lokale, niet uit de database afleidbare gesprekstoestand (bv. "we
   // zijn een correctie aan het opschrijven"). Wordt door ChatWizard teruggezet naar null
   // zodra de fase zelf wisselt.
