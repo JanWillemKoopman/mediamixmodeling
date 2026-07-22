@@ -18,11 +18,14 @@ export function formatMenu(options: MenuOption[]): string {
 //     losse-woord-check hieronder, anders zou bv. "klopt niet" (een exacte synoniem van
 //     "iets aanpassen") verkeerd worden gelezen via het losse woord "klopt" dat toevallig ook
 //     bij "klopt, ga door" hoort.
-//  2. Alleen bij een kort antwoord (≤4 woorden): een los-woord-match, maar uitsluitend als
-//     precies één optie matcht — matchen twee opties allebei een woord, dan is dat een
+//  2. Alleen bij een heel kort antwoord (≤2 woorden): een los-woord-match, maar uitsluitend
+//     als precies één optie matcht — matchen twee opties allebei een woord, dan is dat een
 //     onduidelijk antwoord en geen match (valt door naar de architect-chat).
-// Die woordgrens + eenduidigheidseis voorkomt dat een lang, inhoudelijk antwoord ("ok, zet
-// kanaal tv op delayed adstock...") per ongeluk als bevestiging ("ok") wordt gelezen.
+// Die krappe woordgrens + eenduidigheidseis voorkomt dat een langer, inhoudelijk antwoord
+// ("ja doe dat" als reactie op een architect-vraag, of "ok, zet kanaal tv op delayed
+// adstock...") per ongeluk als bevestiging van een heel ander menu wordt gelezen — dat
+// gebeurde met een ruimere grens (≤4 woorden) toen "ja" in "ja doe dat" bleef haken aan een
+// stale menu-optie terwijl het antwoord eigenlijk voor de architect bedoeld was.
 export function matchOption(reply: string, options: MenuOption[]): MenuOption | null {
   const text = reply.trim().toLowerCase().replace(/[.!?]+$/, "");
   if (!text) return null;
@@ -40,7 +43,7 @@ export function matchOption(reply: string, options: MenuOption[]): MenuOption | 
   }
 
   const words = text.split(/\s+/).filter(Boolean);
-  if (words.length <= 4) {
+  if (words.length <= 2) {
     const wordMatches = options.filter((o) => candidatesOf(o).some((c) => words.includes(c)));
     if (wordMatches.length === 1) return wordMatches[0];
   }

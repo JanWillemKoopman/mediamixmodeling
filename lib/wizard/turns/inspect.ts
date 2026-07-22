@@ -14,7 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import { humanizeError } from "@/lib/humanizeMessage";
 import { postJson } from "@/lib/fetchJson";
 import { formatMenu, matchOption, type MenuOption } from "@/lib/wizard/questions";
-import type { ColumnMapping, DataInspection, SourceFile } from "@/lib/types";
+import type { ColumnMapping, ColumnMappingEntry, PrepareRecipe, DataInspection, SourceFile } from "@/lib/types";
 import type { TurnEnv, TurnReplyResult } from "@/lib/wizard/turns/types";
 
 const GRANULARITY_LABEL: Record<string, string> = {
@@ -95,6 +95,48 @@ function validMapping(mapping: ColumnMapping | null): string | null {
   if (kpiCount !== 1) return "Ik zie niet precies één KPI-kolom — beschrijf welke kolom je doel is (optie 2).";
   if (spendCount === 0) return "Ik zie nog geen enkel kanaal (uitgaven-kolom) — beschrijf welke kolommen dat zijn (optie 2).";
   return null;
+}
+
+// De architect kan een samenvoeg-recept voorstellen én laten toepassen zonder dat de
+// bouwer ooit optie 1 ("klopt, ga door") hierboven heeft getypt — dat is prima, het recept
+// legt de rol per kolom al net zo hard vast. Zonder deze functie bleef `derivePhase` na zo'n
+// toepassing voor altijd "inspect" melden (die check staat vóór alle datasetchecks), met als
+// zichtbaar gevolg: de stap-kop klopte niet meer, de wacht-indicator voor "samenvoegen"
+// verscheen nooit, én elk volgend bericht werd nog steeds door déze fase-resolver gelezen —
+// wat er bijvoorbeeld toe leidde dat een vrije-tekst antwoord als "ja doe dat" (bedoeld voor
+// de architect) hier per ongeluk als "klopt, ga door" werd opgevat. Toepassen van een recept
+// is dus een impliciete, minstens zo sterke bevestiging als optie 1 zelf.
+export async function confirmMappingFromRecipe(source: SourceFile, recipe: PrepareRecipe): Promise<void> {
+  const src = recipe.sources[0];
+  if (!src) return;
+  const byName = new Map<string, ColumnMappingEntry>((source.mapping?.columns ?? []).map((c) => [c.name, c]));
+  for (const c of src.columns) {
+    const prev = byName.get(c.name);
+    byName.set(c.name, { name: c.name, role: c.role, meaning: prev?.meaning ?? "", unit: prev?.unit ?? null, confidence: prev?.confidence ?? "laag" });
+  }
+  if (src.date_column) {
+    const prev = byName.get(src.date_column);
+    byName.set(src.date_column, {
+      name: src.date_column,
+      role: "date",
+      meaning: prev?.meaning ?? "",
+      unit: prev?.unit ?? null,
+      confidence: prev?.confidence ?? "laag",
+    });
+  }
+  const mapping: ColumnMapping = {
+    granularity: source.mapping?.granularity ?? "onbekend",
+    layout: source.mapping?.layout ?? "onbekend",
+    currency: source.mapping?.currency ?? null,
+    reasoning: source.mapping?.reasoning ?? "",
+    columns: Array.from(byName.values()),
+  };
+  const supabase = createClient();
+  await supabase
+    .schema("mmm")
+    .from("source_files")
+    .update({ mapping, inspection_confirmed_at: new Date().toISOString() })
+    .eq("id", source.id);
 }
 
 export async function resolve(env: TurnEnv, reply: string): Promise<TurnReplyResult> {

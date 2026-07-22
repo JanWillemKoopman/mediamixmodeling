@@ -74,5 +74,11 @@ export async function resolve(env: TurnEnv, reply: string): Promise<TurnReplyRes
     const j = await res.json().catch(() => ({}));
     return { handled: true, reply: humanizeError(j.error, "Het samenvoegen kon niet gestart worden — probeer het opnieuw.").text };
   }
-  return { handled: true, refresh: true, reply: "Oké, ik voeg de data samen en controleer de kwaliteit." };
+  return {
+    handled: true,
+    refresh: true,
+    reply:
+      "Oké, ik voeg de data samen en controleer de kwaliteit. Dat duurt meestal minder dan een minuut; " +
+      "ik laat het hier vanzelf weten zodra het klaar is, dan bekijken we samen het kwaliteitsrapport.",
+  };
 }

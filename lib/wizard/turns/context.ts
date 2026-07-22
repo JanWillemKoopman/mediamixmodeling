@@ -30,7 +30,10 @@ function extractMargin(text: string): number | null {
 export async function resolve(env: TurnEnv, reply: string): Promise<TurnReplyResult> {
   if (matchOption(reply, [SKIP_OPTION])) {
     env.skipBusinessContext();
-    return { handled: true, reply: "Prima, we slaan dit voorlopig over — je kunt dit altijd nog nabespreken in de chat." };
+    return {
+      handled: true,
+      reply: "Prima, we slaan dit voorlopig over — je kunt het altijd nog nabespreken in de chat. Nu gaan we het model afstemmen.",
+    };
   }
 
   const res = await fetch("/api/business-context", {

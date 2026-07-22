@@ -54,7 +54,11 @@ export async function resolve(env: TurnEnv, reply: string): Promise<TurnReplyRes
       const j = await res.json().catch(() => ({}));
       return { handled: true, reply: humanizeError(j.error, "Goedkeuren is niet gelukt — probeer het opnieuw.").text };
     }
-    return { handled: true, refresh: true, reply: "Dataset goedgekeurd — we gaan verder." };
+    return {
+      handled: true,
+      refresh: true,
+      reply: "Dataset goedgekeurd. Nu wil ik iets over het bedrijf en de markt weten — dat helpt om betere aannames te kiezen bij het tunen.",
+    };
   }
 
   // "Ik wil iets aanpassen" heeft geen vaste vervolgvraag — laat de bouwer het gewoon

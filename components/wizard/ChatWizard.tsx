@@ -27,6 +27,7 @@ import { matchOption, YES_OPTION } from "@/lib/wizard/questions";
 import { STANDARD_SAMPLE } from "@/lib/wizard/tuningDefaults";
 import { uploadSourceFile } from "@/lib/wizard/turns/upload";
 import * as inspectTurn from "@/lib/wizard/turns/inspect";
+import { confirmMappingFromRecipe } from "@/lib/wizard/turns/inspect";
 import * as prepareRecipeTurn from "@/lib/wizard/turns/prepareRecipe";
 import * as prepareReviewTurn from "@/lib/wizard/turns/prepareReview";
 import * as contextTurn from "@/lib/wizard/turns/context";
@@ -39,7 +40,7 @@ import { SummaryView } from "@/components/SummaryView";
 import { HierarchicalSummaryView } from "@/components/HierarchicalSummaryView";
 import { AnalysisView } from "@/components/AnalysisView";
 import { isHierSummary } from "@/lib/types";
-import type { DataInspection, Dataset, Job, JobConfig, ModelRun, SourceFile } from "@/lib/types";
+import type { DataInspection, Dataset, Job, JobConfig, ModelRun, PrepareRecipe, SourceFile } from "@/lib/types";
 import { Markdown } from "@/components/Markdown";
 
 // Wat de architect op dit moment aan het doen is — puur voor de statusindicator, geen
@@ -381,14 +382,30 @@ export function ChatWizard({
     setError(null);
     try {
       if (kind === "recipe") {
-        const { reasoning: _r, ...recipe } = payload as { reasoning?: string } & Record<string, unknown>;
+        const { reasoning: _r, ...rest } = payload as { reasoning?: string } & Record<string, unknown>;
+        const recipe = rest as unknown as PrepareRecipe;
         const res = await fetch("/api/datasets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ project_id: projectId, recipe }),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error);
-        setTurns((prev) => [...prev, { role: "assistant", text: "Toegepast — ik voeg de data samen en controleer de kwaliteit." }]);
+        // Een toegepast recept legt de kolomrollen al net zo hard vast als handmatig
+        // bevestigen (optie 1 in de inspect-fase) — zonder dit blijft de fase-afleiding voor
+        // altijd "inspect" melden, ook al draait de samenvoeging allang (zie
+        // lib/wizard/turns/inspect.ts: confirmMappingFromRecipe).
+        if (source && !source.inspection_confirmed_at) {
+          await confirmMappingFromRecipe(source, recipe);
+        }
+        setTurns((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text:
+              "Toegepast — ik voeg de data samen en controleer de kwaliteit. Dat duurt meestal minder dan een minuut; " +
+              "ik laat het hier vanzelf weten zodra het klaar is, dan bekijken we samen het kwaliteitsrapport.",
+          },
+        ]);
       } else {
         const { reasoning: _r, ...rest } = payload as { reasoning?: string } & Record<string, unknown>;
         const model = (rest.model as Record<string, unknown> | undefined) ?? {};
@@ -409,7 +426,15 @@ export function ChatWizard({
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error);
         clearReuseJobConfig();
-        setTurns((prev) => [...prev, { role: "assistant", text: "Toegepast — de berekening start." }]);
+        setTurns((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text:
+              "Toegepast — de berekening start. Dit is een uitgebreide berekening en duurt meestal 3 tot 5 minuten; " +
+              "ik laat het hier vanzelf weten zodra die klaar is, dan bespreken we samen het resultaat.",
+          },
+        ]);
       }
       router.refresh();
     } catch (e) {
