@@ -8,6 +8,7 @@ import { ChatWizard } from "@/components/wizard/ChatWizard";
 import { ModelDossier } from "@/components/wizard/ModelDossier";
 import { WizardChatProvider } from "@/components/WizardChatContext";
 import { derivePhase } from "@/lib/wizard/phase";
+import { PHASE_SCRIPT } from "@/lib/wizard/script";
 import { getHandleidingMarkdown } from "@/lib/handleiding";
 import type { BusinessContextNote, Dataset, Job, JobConfig, ModelRun, Project, SourceFile } from "@/lib/types";
 
@@ -102,7 +103,9 @@ export default async function ProjectDetail({ params }: { params: { id: string }
       <WizardChatProvider>
         <div className="mx-auto grid max-w-[1800px] grid-cols-1 gap-0 px-4 pb-4 pt-3 sm:px-6 lg:grid-cols-[1fr_22rem] lg:gap-6">
           {/* Linkerkant — de chat-motor. */}
-          <div className="flex h-[calc(100vh-8rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface-1">
+          <div className="flex flex-col">
+            <p className="mb-2 text-xs font-medium text-accent">{PHASE_SCRIPT[phase].dossierLabel}</p>
+            <div className="flex h-[calc(100vh-8rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface-1">
             <ChatWizard
               projectId={p.id}
               sources={sourceList}
@@ -115,6 +118,7 @@ export default async function ProjectDetail({ params }: { params: { id: string }
               companyDescription={companyDescription}
               contextProvided={contextProvided}
             />
+            </div>
           </div>
 
           {/* Rechterkant — read-only model-dossier. */}
