@@ -1,0 +1,54 @@
+name: Deploy MMM worker (Modal)
+
+# Laptop-vrije deploy van de Modal-worker. Handmatig te starten vanaf het tabblad
+# "Actions" in GitHub (Run workflow). Zo hoef je `modal deploy` niet meer lokaal te
+# draaien. Vereist twee GitHub-secrets: MODAL_TOKEN_ID en MODAL_TOKEN_SECRET
+# (aanmaken op modal.com > Settings > API Tokens, daarna in GitHub onder
+# Settings > Secrets and variables > Actions). De Supabase-secrets zitten al in de
+# Modal Secret `mmm-supabase` en worden hier niet aangeraakt.
+#
+# Bewust ALLEEN handmatig (workflow_dispatch): een deploy herbouwt het worker-image en
+# moet je op een gekozen moment doen, niet ongemerkt bij elke push. Wil je later
+# automatisch deployen bij wijzigingen in de worker, voeg dan een `push`-trigger toe.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-modal-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: modal deploy
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal client
+        run: |
+          python -m pip install --upgrade pip
+          pip install modal
+
+      - name: Check that the Modal token secrets are set
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "::error::MODAL_TOKEN_ID en/of MODAL_TOKEN_SECRET ontbreken. Zet ze onder"
+            echo "::error::Settings > Secrets and variables > Actions voordat je deployt."
+            exit 1
+          fi
+
+      - name: Deploy the worker
+        # Zelfde commando als lokaal, alleen non-interactief geauthenticeerd via de tokens.
+        # Het zware image (pymc e.d.) wordt op Modal gebouwd, niet op deze runner.
+        working-directory: worker
+        run: modal deploy mmm_worker/modal_app.py

@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  /* --font-sans wordt via next/font op <html> gezet (zie layout.tsx). Alleen de
+     mono-stack blijft een systeem-stack: gebruikt voor kleine technische labels. */
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+}
+
+body {
+  @apply bg-bg text-fg antialiased;
+}
+
+/* Strakke, moderne koppen: iets krappere tracking, in dezelfde heldere sans. */
+@layer base {
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.015em;
+  }
+}
+
+::selection {
+  background: rgba(0, 105, 62, 0.16);
+  color: #182420;
+}
+
+/* Dunne, neutrale scrollbars — onopvallend op het lichtgrijze canvas. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+  background-clip: content-box;
+}
+
+/* Getallen/metrics uitlijnen in tabellen. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* iOS Safari zoomt automatisch in op invoervelden met een lettergrootte kleiner dan
+   16px — en zoomt daarna niet terug, waardoor het scherm "vast" ingezoomd blijft.
+   Op touch-apparaten krijgen alle velden daarom minimaal 16px. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Afdrukken / opslaan-als-PDF voor een board-deck: verberg de app-navigatie en
+   interactieve bediening, en klap alle ingeklapte secties (details) open zodat de
+   volledige analyse op papier komt in plaats van alleen de zichtbare samenvattingen.
+   Elementen met data-print="hide" (bv. knoppen, schuiven) vallen weg. */
+@media print {
+  header,
+  [data-print="hide"] {
+    display: none !important;
+  }
+  details > *:not(summary) {
+    display: revert !important;
+  }
+  details > summary {
+    list-style: none;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  /* Vermijd dat kaarten/grafieken over een paginarand worden afgekapt. */
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+}

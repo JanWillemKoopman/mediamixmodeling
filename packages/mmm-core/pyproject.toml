@@ -1,0 +1,48 @@
+[project]
+name = "mmm-core"
+version = "0.1.0"
+description = "Frozen, tested statistical core for the Media Mix Model (MMM) wizard."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "UNLICENSED" }
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    # Used unconditionally by mmm_core.optimize (SLSQP budget optimisation) — not part of
+    # the heavy [model] extra, since optimize.py needs no PyMC/numpyro to run.
+    "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+# The Bayesian model stack — heavy, installed only where a fit actually runs
+# (e.g. the Modal worker). The ingestion & data-quality layer does NOT need these,
+# which keeps the core test loop fast to install and run.
+model = [
+    "pymc>=5.16",
+    "pymc-marketing>=0.7",
+    "numpyro>=0.15",
+    "arviz>=0.18",
+]
+dev = [
+    "pytest>=8.0",
+    "openpyxl>=3.1",  # xlsx reading for ingestion tests
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mmm_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Keep the default loop fast; the end-to-end Bayesian fit is opt-in via `-m slow`.
+addopts = "-ra -m 'not slow'"
+markers = [
+    "slow: end-to-end Bayesian fit — needs the [model] extra, runs in ~30s",
+]
+
+[tool.uv]
+# Keep dev + build tooling reproducible without pulling the model stack by default.
+default-groups = []

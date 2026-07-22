@@ -1,0 +1,63 @@
+name: CI
+
+# Automatische verificatie bij elke push (en handmatig te starten). Drie onafhankelijke
+# jobs: de Next.js-app (types + build), de mmm-core rekenkern (incl. de echte fit achter
+# de `slow`-marker) en de Modal-worker (contract- en unit-tests). De zware [model]-stack
+# (pymc/numpyro/arviz) wordt alleen in de mmm-core-job geïnstalleerd, waar de fit draait.
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  mmm-core:
+    name: mmm-core (fit + unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      # De [model]-extra levert pymc/numpyro/arviz — nodig voor de echte NUTS-fit die de
+      # `slow`-tests draaien (o.a. de decompositie- en weekly-uitvoer die het dashboard leest).
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e "packages/mmm-core[model,dev]"
+      # Eerst de snelle laag (ingestion/transforms/optimize/…), dan de echte fit.
+      - run: pytest packages/mmm-core
+      - run: pytest packages/mmm-core -m slow
+
+  worker:
+    name: Worker (contract + unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      # mmm-core eerst (editable), zodat de worker z'n path-dependency vervuld ziet zonder
+      # de zware [model]-stack: de worker-tests draaien geen echte fit.
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e "packages/mmm-core[dev]"
+          pip install -e "worker[dev]"
+      - run: pytest worker/tests

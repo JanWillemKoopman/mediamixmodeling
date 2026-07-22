@@ -1,0 +1,31 @@
+[project]
+name = "mmm-worker"
+version = "0.1.0"
+description = "Async Modal worker: runs the frozen mmm-core fit off the request path."
+requires-python = ">=3.11"
+dependencies = [
+    "mmm-core",
+    "pandas>=2.1",
+    "openpyxl>=3.1",   # read uploaded .xlsx sources
+]
+
+[project.optional-dependencies]
+# The worker actually fits on Modal, so it needs the heavy model stack there.
+model = ["mmm-core[model]"]
+# The Supabase client + Modal SDK are only needed for the deployed adapters, not tests.
+runtime = ["supabase>=2.6", "modal>=0.64"]
+dev = ["pytest>=8.0"]
+
+[tool.uv.sources]
+mmm-core = { path = "../packages/mmm-core" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mmm_worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

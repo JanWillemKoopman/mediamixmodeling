@@ -1,0 +1,89 @@
+// Cross-language contract regression check.
+//
+// This constant mirrors `worker/tests/fixtures/job_config_contract.json` field-for-field
+// (same values, exercising every optional field of the JobConfig contract). It is never
+// imported or run — `satisfies JobConfig` makes `npm run typecheck` fail if this shape and
+// the JobConfig type drift apart, which is the TS half of the contract-drift check; the
+// Python half is `worker/tests/test_contract_fixture.py`.
+//
+// There is no automated fixture sync: when you change a field on either side, update the
+// literal object below (and/or the JSON fixture) by hand to match.
+import type { JobConfig } from "@/lib/types";
+
+const _jobConfigContractCheck = {
+  sources: [
+    {
+      name: "revenue",
+      storage_path: "proj/revenue.csv",
+      date_column: "week",
+      essential: true,
+      transforms: [{ op: "rename", params: { from: "rev", to: "revenue" } }],
+      columns: [{ name: "revenue", role: "kpi" }],
+    },
+    {
+      name: "google",
+      storage_path: "proj/google.csv",
+      date_column: "date",
+      essential: true,
+      columns: [{ name: "spend", role: "spend", output_name: "google_spend" }],
+    },
+    {
+      name: "weather",
+      storage_path: "proj/weather.csv",
+      date_column: "date",
+      essential: false,
+      columns: [
+        { name: "avg_temp", role: "control", output_name: "temperature", fill: "interpolate" },
+      ],
+    },
+  ],
+  event_dummies: [{ name: "dummy_2025w45", weeks: [[2025, 45]] }],
+  features: [{ name: "google_spend_lag1", op: "lag", inputs: ["google_spend"], params: { weeks: 1 } }],
+  model: {
+    kpi: "revenue",
+    channels: [
+      {
+        name: "google_spend",
+        channel_type: "intent",
+        l_max: 8,
+        expected_half_life: 1.5,
+        adstock: "delayed",
+        saturation: "logistic",
+        priors: {
+          beta_sigma: 0.6,
+          adstock_concentration: 15.0,
+          delayed_peak_weeks: 2.5,
+          delayed_peak_sigma: 1.0,
+          hill_slope_a: 2.5,
+          hill_slope_b: 2.5,
+          halfsat_a: 2.0,
+          halfsat_b: 2.0,
+          logistic_lam_sigma: 1.5,
+        },
+        calibration: { roas: 3.2, sd: 0.5 },
+      },
+    ],
+    control_columns: ["temperature"],
+    add_trend: true,
+    trend_type: "piecewise",
+    n_changepoints: 4,
+    seasonality_periods: 52,
+    n_fourier_modes: 2,
+    likelihood: "student_t",
+    student_t_nu: 5,
+    priors: {
+      intercept_sigma: 0.3,
+      trend_sigma: 0.4,
+      season_sigma: 0.15,
+      control_sigma: 0.4,
+      noise_sigma: 0.12,
+      changepoint_scale: 0.08,
+    },
+  },
+  sample: { draws: 500, tune: 500, chains: 2, target_accept: 0.92, seed: 7 },
+  evaluation: { cross_validation: true, placebo: true },
+} satisfies JobConfig;
+
+// Referenced so the "unused variable" lint rule doesn't fire on a const that exists only
+// for its compile-time `satisfies` check.
+export type _JobConfigContractCheck = typeof _jobConfigContractCheck;
