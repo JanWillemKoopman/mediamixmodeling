@@ -2,9 +2,9 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 
-// Browser-side Supabase client (publishable key). Deze app is volledig losstaand van
-// mmm-wizard: alle tabellen leven in het `sander`-schema, niet in `mmm`. Auth (users,
-// sessions) blijft gedeeld op het default `auth`-schema van hetzelfde Supabase-project.
+// Browser-side Supabase client voor de sander-app. Zelfde Supabase-project/deployment
+// als mmm-wizard, maar sander-tabellen leven in het aparte `sander`-schema — queries via
+// deze client raken dus nooit mmm.* aan. Auth (auth.users) is gedeeld.
 export function createClient() {
   return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

@@ -1,6 +1,7 @@
--- 'sander' is een volledig losstaande app in de sander/ map van deze repo. Deelt hetzelfde
--- Supabase-project (en dus auth.users) met mmm-wizard, maar de data zelf leeft in een eigen
--- schema zodat er geen enkele overlap of afhankelijkheid met mmm.* tabellen ontstaat.
+-- 'sander' is een eigen route (/sander) binnen deze Next.js-app en deployment. Deelt
+-- hetzelfde Supabase-project (en dus auth.users) met mmm-wizard, maar de data zelf leeft
+-- in een eigen schema zodat er geen enkele overlap of afhankelijkheid met mmm.* tabellen
+-- ontstaat.
 create schema if not exists sander;
 
 -- PostgREST exposeert alleen schemas die expliciet zijn toegevoegd aan de API-config

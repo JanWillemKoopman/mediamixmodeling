@@ -3,8 +3,8 @@ import { cookies } from "next/headers";
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions };
 
-// Server-side Supabase client bound to the request cookies (RLS runs as the signed-in
-// user). Queries default to the `sander` schema — see lib/supabase/client.ts.
+// Server-side Supabase client voor de sander-app, gebonden aan het `sander`-schema (zie
+// lib/sander/supabase/client.ts). Zelfde request-cookie/RLS-patroon als lib/supabase/server.ts.
 export function createClient() {
   const cookieStore = cookies();
   return createServerClient(
