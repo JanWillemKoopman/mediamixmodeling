@@ -11,10 +11,10 @@ import type { FitSummary, Interval, ResponseCurve } from "@/lib/types";
 // geïnterpoleerd uit de al berekende responscurves (bijdrage per kanaal bij een gegeven
 // weekspend), dus geen extra rekengang of AI-aanroep nodig.
 
-const ACCENT = "#00693E";
-const NEUTRAL = "#97A09B";
-const GRID = "rgba(0,0,0,0.07)";
-const AXIS = { fontSize: 11, fill: "#5C6660" };
+const ACCENT = "#003DA5";
+const NEUTRAL = "#A6A099";
+const GRID = "rgba(25,36,59,0.08)";
+const AXIS = { fontSize: 11, fill: "#3F4B63" };
 
 function fmt(n: number, digits = 0): string {
   return n.toLocaleString("nl-NL", { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -196,7 +196,7 @@ export function ScenarioPlanner({ summary, kpiMargin }: { summary: FitSummary; k
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-fg">Stel zelf een toekomstscenario samen</h2>
+        <h2 className="text-lg font-sans-w7 font-bold text-fg">Stel zelf een toekomstscenario samen</h2>
         <p className="mt-1 text-sm text-fg-muted">
           Plus of min de weekspend per kanaal — met de schuif (%) of door een exact bedrag in te typen — en
           lees direct af wat het model verwacht dat er met je {summary.kpi} en je kosten gebeurt, vergeleken met
@@ -254,7 +254,7 @@ export function ScenarioPlanner({ summary, kpiMargin }: { summary: FitSummary; k
                   step={Math.max(1, Math.round(r.max / 200))}
                   value={Math.min(r.chosen, r.max)}
                   onChange={(e) => setSpend(r.name, Number(e.target.value))}
-                  className="h-1.5 min-w-[160px] flex-1 accent-[#00693E]"
+                  className="h-1.5 min-w-[160px] flex-1 accent-[#003DA5]"
                   aria-label={`Weekspend ${r.name}`}
                 />
                 <div className="flex items-center gap-1.5">
@@ -412,29 +412,30 @@ export function ScenarioPlanner({ summary, kpiMargin }: { summary: FitSummary; k
           </p>
         ) : (
           <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[420px] text-sm">
+            <table className="w-full min-w-[420px] overflow-hidden rounded-2xl text-sm">
               <thead>
-                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-fg-faint">
-                  <th className="py-1.5 pr-3 font-medium">Scenario</th>
-                  <th className="py-1.5 pr-3 font-medium">Kosten/wk</th>
-                  <th className="py-1.5 pr-3 font-medium">{summary.kpi}/wk</th>
-                  <th className="py-1.5 pr-3 font-medium">Δ KPI vs. nu</th>
-                  <th className="py-1.5 font-medium" />
+                <tr className="bg-surface-3 text-left text-xs font-sans-w7 uppercase tracking-wide text-fg">
+                  <th className="rounded-tl-2xl py-2 pr-3 pl-4 font-sans-w7">Scenario</th>
+                  <th className="py-2 pr-3 font-sans-w7">Kosten/wk</th>
+                  <th className="py-2 pr-3 font-sans-w7">{summary.kpi}/wk</th>
+                  <th className="py-2 pr-3 font-sans-w7">Δ KPI vs. nu</th>
+                  <th className="rounded-tr-2xl py-2 font-sans-w7" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
-                <tr>
-                  <td className="py-2 pr-3 font-medium text-fg">Huidige mix</td>
+              <tbody>
+                <tr className="bg-surface">
+                  <td className={`py-2 pr-3 pl-4 font-medium text-fg ${saved.length === 0 ? "rounded-bl-2xl" : ""}`}>Huidige mix</td>
                   <td className="py-2 pr-3 tabular-nums text-fg-muted">{fmt(totals.baseSpend)}</td>
                   <td className="py-2 pr-3 tabular-nums text-fg-muted">{fmt(totals.baseKpi)}</td>
                   <td className="py-2 pr-3 tabular-nums text-fg-faint">—</td>
-                  <td className="py-2" />
+                  <td className={`py-2 ${saved.length === 0 ? "rounded-br-2xl" : ""}`} />
                 </tr>
-                {saved.map((s) => {
+                {saved.map((s, i, arr) => {
                   const d = s.weekKpi - totals.baseKpi;
+                  const last = i === arr.length - 1;
                   return (
-                    <tr key={s.id}>
-                      <td className="py-2 pr-3 font-medium text-fg">{s.label}</td>
+                    <tr key={s.id} className={i % 2 === 0 ? "bg-surface-2" : "bg-surface"}>
+                      <td className={`py-2 pr-3 pl-4 font-medium text-fg ${last ? "rounded-bl-2xl" : ""}`}>{s.label}</td>
                       <td className="py-2 pr-3 tabular-nums text-fg">{fmt(s.weekSpend)}</td>
                       <td className="py-2 pr-3 tabular-nums text-fg">{fmt(s.weekKpi)}</td>
                       <td
@@ -444,10 +445,10 @@ export function ScenarioPlanner({ summary, kpiMargin }: { summary: FitSummary; k
                       >
                         {fmtSigned(d)}
                       </td>
-                      <td className="py-2 text-right">
+                      <td className={`py-2 text-right ${last ? "rounded-br-2xl" : ""}`}>
                         <button
                           onClick={() => setSaved((prev) => prev.filter((x) => x.id !== s.id))}
-                          className="text-xs text-fg-faint transition hover:text-danger"
+                          className="pr-3 text-xs text-fg-faint transition hover:text-danger"
                           aria-label={`Verwijder ${s.label}`}
                         >
                           verwijder
@@ -472,8 +473,8 @@ export function ScenarioPlanner({ summary, kpiMargin }: { summary: FitSummary; k
               <XAxis type="number" tick={AXIS} tickFormatter={fmtShort} />
               <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
               <Tooltip
-                cursor={{ fill: "rgba(0,0,0,0.05)" }}
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+                cursor={{ fill: "rgba(25,36,59,0.05)" }}
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
                 formatter={(v, n) => [typeof v === "number" ? fmt(v) : String(v), n === "nu" ? "nu" : "scenario"]}
               />
               <Bar dataKey="nu" fill={NEUTRAL} radius={[0, 3, 3, 0]} barSize={11} name="nu" />

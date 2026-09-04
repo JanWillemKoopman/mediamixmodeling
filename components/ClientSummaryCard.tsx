@@ -9,7 +9,7 @@ export function ClientSummaryCard({ summary }: { summary: ClientSummary }) {
   if (!summary.text.trim()) return null;
   return (
     <section className="print-avoid-break rounded-xl border border-border-strong bg-surface-2/60 p-4">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-fg-faint">Samenvatting</h2>
+      <h2 className="text-sm font-sans-w7 font-bold uppercase tracking-wide text-fg-faint">Samenvatting</h2>
       <Markdown text={summary.text} className="mt-2 text-sm leading-relaxed text-fg" />
     </section>
   );

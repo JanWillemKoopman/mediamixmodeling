@@ -56,40 +56,49 @@ export function HierarchicalSummaryView({ summary }: { summary: HierSummary }) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full overflow-hidden rounded-2xl text-sm">
           <thead>
-            <tr className="border-b border-border text-left text-xs text-fg-muted">
-              <th className="py-2 pr-3 font-medium">Kanaal</th>
-              <th className="py-2 pr-3 font-medium">Aandeel (globaal)</th>
-              <th className="py-2 pr-3 font-medium">ROAS (globaal)</th>
-              {summary.regions.map((r) => (
-                <th key={r} className="py-2 pr-3 font-medium">
+            <tr className="bg-surface-3 text-left text-xs font-sans-w7 uppercase tracking-wide text-fg">
+              <th className="rounded-tl-2xl py-2.5 pr-3 pl-4 font-sans-w7">Kanaal</th>
+              <th className="py-2.5 pr-3 font-sans-w7">Aandeel (globaal)</th>
+              <th className="py-2.5 pr-3 font-sans-w7">ROAS (globaal)</th>
+              {summary.regions.map((r, i) => (
+                <th
+                  key={r}
+                  className={`py-2.5 pr-3 font-sans-w7 ${i === summary.regions.length - 1 ? "rounded-tr-2xl" : ""}`}
+                >
                   Aandeel {r}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {summary.channels.map((ch) => (
-              <tr key={ch.name} className="border-b border-border last:border-0">
-                <td className="py-2 pr-3 font-medium text-fg">{ch.name}</td>
-                <td className="py-2 pr-3">
-                  <IntervalCell value={ch.global_contribution_share} render={pct} />
-                </td>
-                <td className="py-2 pr-3">
-                  <IntervalCell value={ch.global_roas} render={(n) => fmt(n, 2)} />
-                </td>
-                {summary.regions.map((r) => (
-                  <td key={r} className="py-2 pr-3">
-                    {ch.per_region_share[r] ? (
-                      <IntervalCell value={ch.per_region_share[r]} render={pct} />
-                    ) : (
-                      <span className="text-fg-faint">—</span>
-                    )}
+            {summary.channels.map((ch, i, arr) => {
+              const last = i === arr.length - 1;
+              return (
+                <tr key={ch.name} className={i % 2 === 1 ? "bg-surface-2" : "bg-surface"}>
+                  <td className={`py-2 pr-3 pl-4 font-medium text-fg ${last ? "rounded-bl-2xl" : ""}`}>{ch.name}</td>
+                  <td className="py-2 pr-3">
+                    <IntervalCell value={ch.global_contribution_share} render={pct} />
                   </td>
-                ))}
-              </tr>
-            ))}
+                  <td className="py-2 pr-3">
+                    <IntervalCell value={ch.global_roas} render={(n) => fmt(n, 2)} />
+                  </td>
+                  {summary.regions.map((r, j) => (
+                    <td
+                      key={r}
+                      className={`py-2 pr-3 ${last && j === summary.regions.length - 1 ? "rounded-br-2xl" : ""}`}
+                    >
+                      {ch.per_region_share[r] ? (
+                        <IntervalCell value={ch.per_region_share[r]} render={pct} />
+                      ) : (
+                        <span className="text-fg-faint">—</span>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
