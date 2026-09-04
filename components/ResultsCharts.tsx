@@ -23,17 +23,17 @@ import type { BaselineDecomposition, FitSummary, ResponseCurve, WeeklyDecomposit
 // no AI call, so these always render (unlike the optional deep-analysis step below them).
 // Georganiseerd langs de vier vragen van een budgetgesprek: wat gebeurde er → wat leverde
 // elk kanaal op → waar kan de volgende euro heen → hoe werkt het (verdieping).
-// Starbucks.nl-palet voor de grafieken: House Green als accent, koele grijzen als
-// neutralen, diep bosgroen als inkt.
-const ACCENT = "#00693E";
-const ACCENT_SOFT = "#5FA588";
-const NEUTRAL = "#97A09B";
-const BASELINE_FILL = "#E4E7E5";
-const INK = "#1E3932";
+// Udenhout.nl-palet voor de grafieken: helderblauw als accent, zand/beige als
+// neutralen, donkerblauw als inkt.
+const ACCENT = "#003DA5";
+const ACCENT_SOFT = "#5C8CC9";
+const NEUTRAL = "#A6A099";
+const BASELINE_FILL = "#EDE9E1";
+const INK = "#19243B";
 const SUCCESS = "#1E7A4B";
 const DANGER = "#C0362C";
-const GRID = "rgba(0,0,0,0.07)";
-const AXIS = { fontSize: 11, fill: "#5C6660" };
+const GRID = "rgba(25,36,59,0.08)";
+const AXIS = { fontSize: 11, fill: "#3F4B63" };
 
 function fmt(n: number, digits = 0): string {
   return n.toLocaleString("nl-NL", { maximumFractionDigits: digits });
@@ -46,24 +46,24 @@ function fmtShort(n: number): string {
   return fmt(n);
 }
 
-// Kanaal-lagen in de opbouwgrafiek: een curated, koel-getint Starbucks-palet. Bewust
-// afwisselend groen ↔ accent en met flinke lichtheidsstappen tussen naburige lagen, zodat
-// gestapelde vlakken duidelijk te onderscheiden blijven (i.p.v. één groene massa) terwijl
-// het palet on-brand blijft. Buiten de reeks: een rustig groen-hue verloop.
+// Kanaal-lagen in de opbouwgrafiek: een curated Udenhout-palet dat afwisselt tussen
+// helderblauw en oranje, met donkerblauw en zand als steunkleuren, zodat gestapelde
+// vlakken duidelijk te onderscheiden blijven terwijl het palet on-brand blijft. Buiten
+// de reeks: een rustig blauw-hue verloop.
 const CHANNEL_PALETTE = [
-  "#00693E", // house green
-  "#C88A2C", // goud
-  "#2E8B8B", // teal
-  "#6BAF92", // salie
-  "#B4633A", // klei
-  "#1E3932", // diep bosgroen
-  "#8A938F", // koel grijs
-  "#4C5F57", // steen-groen
+  "#003DA5", // helderblauw
+  "#ED6935", // oranje
+  "#19243B", // donkerblauw
+  "#5C8CC9", // lichtblauw
+  "#F2A46B", // lichtoranje
+  "#8FA0C2", // blauwgrijs
+  "#B9AF9E", // zand-grijs
+  "#4A5A78", // donker blauwgrijs
 ];
 function channelColor(i: number, n: number): string {
   if (i < CHANNEL_PALETTE.length) return CHANNEL_PALETTE[i];
   const light = 34 + ((i - CHANNEL_PALETTE.length) * 30) / Math.max(1, n - 1);
-  return `hsl(158, 42%, ${Math.min(70, light)}%)`;
+  return `hsl(214, 55%, ${Math.min(70, light)}%)`;
 }
 
 function ChartCard({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -79,7 +79,7 @@ function ChartCard({ title, hint, children }: { title: string; hint?: string; ch
 function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="border-b border-border pb-1.5">
-      <p className="text-[13px] font-semibold uppercase tracking-wide text-fg">{title}</p>
+      <p className="text-[13px] font-sans-w7 font-bold uppercase tracking-wide text-fg">{title}</p>
       <p className="text-xs text-fg-muted">{subtitle}</p>
     </div>
   );
@@ -237,7 +237,7 @@ function BuildUpChart({ weekly, kpi }: { weekly: WeeklyDecomposition; kpi: strin
           <XAxis dataKey="date" tick={AXIS} minTickGap={48} />
           <YAxis tick={AXIS} width={48} tickFormatter={fmtShort} />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
             formatter={(v) => (typeof v === "number" ? fmt(v) : String(v))}
           />
           <Area dataKey="Basislijn" stackId="kpi" stroke="none" fill={BASELINE_FILL} fillOpacity={0.95} />
@@ -299,7 +299,7 @@ function MixShiftChart({ weekly, kpi }: { weekly: WeeklyDecomposition; kpi: stri
           <XAxis dataKey="date" tick={AXIS} minTickGap={48} />
           <YAxis tick={AXIS} width={40} tickFormatter={(v) => `${fmt(v * 100)}%`} />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
             formatter={(v) => (typeof v === "number" ? `${fmt(v, 1)}%` : String(v))}
           />
           {channelNames.map((n, i) => (
@@ -341,7 +341,7 @@ const BASELINE_COLORS: Record<string, string> = {
   niveau: BASELINE_FILL,
   trend: ACCENT,
   seizoen: ACCENT_SOFT,
-  externe_factoren: "#C88A2C",
+  externe_factoren: "#ED6935",
 };
 function BaselineDecompositionChart({ decomp, kpi }: { decomp: BaselineDecomposition; kpi: string }) {
   const keys = Object.keys(decomp.components).filter((k) => decomp.components[k]?.length);
@@ -366,9 +366,9 @@ function BaselineDecompositionChart({ decomp, kpi }: { decomp: BaselineDecomposi
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tick={AXIS} minTickGap={48} />
           <YAxis tick={AXIS} width={48} tickFormatter={fmtShort} />
-          <ReferenceLine y={0} stroke="#4C5F57" strokeWidth={1} />
+          <ReferenceLine y={0} stroke="#3F4B63" strokeWidth={1} />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
             formatter={(v) => (typeof v === "number" ? fmt(v) : String(v))}
           />
           {keys.map((k) => (
@@ -434,7 +434,7 @@ function RoasOverTimeChart({ weekly }: { weekly: WeeklyDecomposition }) {
           <XAxis dataKey="date" tick={AXIS} minTickGap={48} />
           <YAxis tick={AXIS} width={44} tickFormatter={(v) => fmt(v, 1)} />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
             formatter={(v, n) => [typeof v === "number" ? fmt(v, 2) : "—", String(n)]}
           />
           {shown.map((n, i) => (
@@ -493,7 +493,7 @@ function WaterfallChart({ summary }: { summary: FitSummary }) {
           <XAxis type="number" tick={AXIS} tickFormatter={fmtShort} />
           <YAxis type="category" dataKey="name" tick={AXIS} width={110} />
           <Tooltip
-            cursor={{ fill: "rgba(0,0,0,0.05)" }}
+            cursor={{ fill: "rgba(25,36,59,0.05)" }}
             content={({ active, payload }) => {
               if (!active || !payload?.[1]) return null;
               const d = payload[1].payload as { name: string; value: number };
@@ -536,7 +536,7 @@ function FitVsActualChart({ weekly, coverage }: { weekly: WeeklyDecomposition; c
           <XAxis dataKey="date" tick={AXIS} minTickGap={48} />
           <YAxis tick={AXIS} width={48} tickFormatter={fmtShort} />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
             formatter={(v) => (Array.isArray(v) ? `${fmt(Number(v[0]))} – ${fmt(Number(v[1]))}` : typeof v === "number" ? fmt(v) : String(v))}
           />
           <Area dataKey="band" stroke="none" fill={ACCENT} fillOpacity={0.12} name="94%-band" />
@@ -574,8 +574,8 @@ function SpendVsReturnChart({ summary }: { summary: FitSummary }) {
           <XAxis type="number" tick={AXIS} tickFormatter={fmtShort} />
           <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
           <Tooltip
-            cursor={{ fill: "rgba(0,0,0,0.05)" }}
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+            cursor={{ fill: "rgba(25,36,59,0.05)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
             formatter={(v) => (typeof v === "number" ? fmt(v) : String(v))}
           />
           <Bar dataKey="kosten" fill={NEUTRAL} radius={[0, 3, 3, 0]} barSize={11} name="kosten" />
@@ -609,8 +609,8 @@ function BudgetVsEffectChart({ summary }: { summary: FitSummary }) {
           <XAxis type="number" tick={AXIS} tickFormatter={(v) => `${fmt(v)}%`} />
           <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
           <Tooltip
-            cursor={{ fill: "rgba(0,0,0,0.05)" }}
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+            cursor={{ fill: "rgba(25,36,59,0.05)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
             formatter={(v) => (typeof v === "number" ? `${fmt(v, 1)}%` : String(v))}
           />
           <Bar dataKey="budget" fill={NEUTRAL} radius={[0, 3, 3, 0]} barSize={11} name="aandeel budget" />
@@ -668,8 +668,8 @@ function MarginalEuroChart({ summary }: { summary: FitSummary }) {
           <XAxis type="number" tick={AXIS} tickFormatter={fmtShort} />
           <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
           <Tooltip
-            cursor={{ fill: "rgba(0,0,0,0.05)" }}
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+            cursor={{ fill: "rgba(25,36,59,0.05)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
             formatter={(v) => (typeof v === "number" ? fmt(v) : String(v))}
           />
           <Bar dataKey="marginaal" radius={[0, 3, 3, 0]} barSize={14}>
@@ -723,7 +723,7 @@ function WhatIfSlider({ summary }: { summary: FitSummary }) {
           step={(max - min) / 100 || 1}
           value={chosen}
           onChange={(e) => setBudget(Number(e.target.value))}
-          className="w-full accent-[#00693E]"
+          className="w-full accent-[#003DA5]"
           aria-label="Totaal weekbudget"
         />
         <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
@@ -778,7 +778,7 @@ function AdstockDecayGrid({ summary }: { summary: FitSummary }) {
                 <XAxis dataKey="week" tick={AXIS} tickFormatter={(v) => `${v}`} />
                 <YAxis hide />
                 <Tooltip
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)" }}
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
                   formatter={(v) => (typeof v === "number" ? `${fmt(v, 1)}% van het effect` : String(v))}
                   labelFormatter={(l) => `week +${l}`}
                 />
@@ -879,8 +879,8 @@ export function ResultsCharts({
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
               <XAxis type="number" tick={AXIS} />
               <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
-              <Tooltip content={<RoasTooltip />} cursor={{ fill: "rgba(0,0,0,0.05)" }} />
-              <ReferenceLine x={breakEven} stroke="#4C5F57" strokeDasharray="4 4" label={{ value: "break-even", position: "top", fontSize: 10, fill: "#4C5F57" }} />
+              <Tooltip content={<RoasTooltip />} cursor={{ fill: "rgba(25,36,59,0.05)" }} />
+              <ReferenceLine x={breakEven} stroke="#3F4B63" strokeDasharray="4 4" label={{ value: "break-even", position: "top", fontSize: 10, fill: "#3F4B63" }} />
               <Bar dataKey="p50" radius={[0, 3, 3, 0]} barSize={14}>
                 {roasData.map((d) => (
                   <Cell key={d.name} fill={d.p3 >= breakEven ? SUCCESS : d.p97 <= breakEven ? DANGER : NEUTRAL} />
@@ -903,7 +903,7 @@ export function ResultsCharts({
                 <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
                 <XAxis type="number" tick={AXIS} tickFormatter={fmtShort} />
                 <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
-                <Tooltip content={<SplitTooltip />} cursor={{ fill: "rgba(0,0,0,0.05)" }} />
+                <Tooltip content={<SplitTooltip />} cursor={{ fill: "rgba(25,36,59,0.05)" }} />
                 <Bar dataKey="direct" stackId="split" fill={ACCENT} barSize={14} name="Direct" />
                 <Bar dataKey="carryover" stackId="split" fill={ACCENT_SOFT} radius={[0, 3, 3, 0]} barSize={14} name="Na-ijl" />
               </BarChart>
@@ -953,9 +953,9 @@ export function ResultsCharts({
                       <Line type="monotone" dataKey="p50" stroke={ACCENT} strokeWidth={2} dot={false} />
                       <ReferenceLine
                         x={curve.current_weekly_spend}
-                        stroke="#4C5F57"
+                        stroke="#3F4B63"
                         strokeDasharray="4 4"
-                        label={{ value: "nu", position: "top", fontSize: 10, fill: "#4C5F57" }}
+                        label={{ value: "nu", position: "top", fontSize: 10, fill: "#3F4B63" }}
                       />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -986,9 +986,9 @@ export function ResultsCharts({
               {allocation && (
                 <ReferenceLine
                   x={allocation.total_weekly_budget}
-                  stroke="#4C5F57"
+                  stroke="#3F4B63"
                   strokeDasharray="4 4"
-                  label={{ value: "nu", position: "top", fontSize: 10, fill: "#4C5F57" }}
+                  label={{ value: "nu", position: "top", fontSize: 10, fill: "#3F4B63" }}
                 />
               )}
             </AreaChart>
@@ -1005,7 +1005,7 @@ export function ResultsCharts({
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
               <XAxis type="number" tick={AXIS} tickFormatter={(v) => fmt(v)} />
               <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
-              <Tooltip content={<ReallocTooltip />} cursor={{ fill: "rgba(0,0,0,0.05)" }} />
+              <Tooltip content={<ReallocTooltip />} cursor={{ fill: "rgba(25,36,59,0.05)" }} />
               <Bar dataKey="delta" radius={[0, 3, 3, 0]} barSize={14}>
                 {reallocData.map((d) => (
                   <Cell key={d.name} fill={d.delta >= 0 ? ACCENT : NEUTRAL} />

@@ -1,56 +1,53 @@
 import type { Config } from "tailwindcss";
 
-// Starbucks.nl-palet (modern & koel): bijna-witte / lichtgrijze canvassen, platte vlakken
-// zónder schaduw, koel bijna-zwart voor tekst (meer grijs dan bruin), en het House Green
-// als merk-/actiekleur met diep bosgroen voor donkere vlakken. Semantische tokens
-// (bg / surface / border / fg / accent …) zodat de hele app centraal bij te stellen is.
+// Udenhout.nl-huisstijl: wit/lichtbeige canvas, zand/beige neutralen voor kaarten en
+// tabelkoppen, donkerblauw als inkt- en merkkleur, helderblauw als primaire actiekleur en
+// oranje als secundair accent. Semantische tokens (bg / surface / border / fg / accent …)
+// zodat de hele app centraal bij te stellen blijft.
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        // Koel, bijna-wit lichtgrijs canvas (niet crème).
-        bg: "#F4F5F4",
+        // Wit canvas — Udenhout.nl-secties wisselen wit af met lichtbeige vlakken.
+        bg: "#FFFFFF",
         surface: {
-          DEFAULT: "#FFFFFF", // witte kaart die plat op het lichtgrijze canvas ligt
-          2: "#F0F1F0", // subtiel koel grijs voor genestelde vlakken / invoervelden
-          3: "#E6E8E7", // iets dieper grijs voor actieve/ingedrukte vlakken
+          DEFAULT: "#FFFFFF", // witte kaart
+          2: "#F6F4F0", // lichtbeige — genestelde vlakken, invoervelden, tabel-zebra
+          3: "#E2DDD1", // zand/beige — tabelkoppen, actieve/ingedrukte vlakken
         },
         border: {
-          // Flat design: de algemene rand is onzichtbaar (transparant) — vlakken worden
-          // onderscheiden door hun tint, niet door lijnen. `strong` blijft een echte,
-          // subtiele lijn voor de enkele plek die er bewust om vraagt (bv. outline-knop).
-          DEFAULT: "transparent",
-          strong: "rgba(0,0,0,0.16)",
+          // Subtiele, warme scheidingslijn afgeleid van het donkerblauw — geen kille grijzen.
+          DEFAULT: "rgba(25,36,59,0.10)",
+          strong: "rgba(25,36,59,0.22)",
         },
         fg: {
-          DEFAULT: "#182420", // koel bijna-zwart met een vleugje bosgroen — neutraal, niet bruin
-          muted: "#5C6660",
-          faint: "#8C938F",
+          DEFAULT: "#000000", // zwart lichaamstekst, zoals de huisstijl voorschrijft
+          muted: "rgba(25,36,59,0.72)",
+          faint: "rgba(25,36,59,0.48)",
         },
-        // Het Starbucks House Green als enige primaire actie-/merkkleur.
+        // Helderblauw als primaire actie-/linkkleur (zoals a:hover op udenhout.nl).
         accent: {
-          DEFAULT: "#00693E",
-          hover: "#00522F",
-          dim: "rgba(0,105,62,0.08)",
+          DEFAULT: "#003DA5",
+          hover: "#002E7D",
+          dim: "rgba(0,61,165,0.08)",
         },
-        // Merkgroen-schaal voor de marketing/landingsvlakken. Ondersteunt opacity-modifiers
-        // (brand-500/10) net als losse kleuren. 700 = het diepe bosgroen van donkere vlakken.
+        // Donkerblauw-schaal voor merk-/navigatievlakken. 700 = het donkerblauw #19243b.
         brand: {
-          50: "#E8F1EC",
-          100: "#C9E3D5",
-          200: "#9BCDB4",
-          300: "#5FAE8B",
-          400: "#1F8B5C",
-          500: "#00693E",
-          600: "#00522F",
-          700: "#1E3932",
+          50: "#E6EAF1",
+          100: "#C2CCDE",
+          200: "#8FA0C2",
+          300: "#5574A5",
+          400: "#26437C",
+          500: "#19243B",
+          600: "#141C2F",
+          700: "#0E1421",
         },
-        // Warme goud-accent — uitsluitend voor het logo, niet voor de UI.
-        gold: {
-          DEFAULT: "#B8863B",
-          soft: "#CBA258",
-          dim: "rgba(203,162,88,0.16)",
+        // Oranje — secundair accent, zoals state-orange knoppen/bullets in de huisstijl.
+        orange: {
+          DEFAULT: "#ED6935",
+          hover: "#D8571F",
+          dim: "rgba(237,105,53,0.10)",
         },
         success: {
           DEFAULT: "#1E7A4B",
@@ -65,41 +62,42 @@ const config: Config = {
           dim: "rgba(154,107,18,0.12)",
         },
         user: {
-          DEFAULT: "#1F5A8C", // Zachte marine-blauw voor user bubbles
+          DEFAULT: "#003DA5",
         },
       },
       fontFamily: {
-        // Strakke, moderne humanistische sans (Figtree via next/font, zie layout.tsx) —
-        // in de geest van Starbucks' SoDo Sans, voor zowel koppen als broodtekst.
-        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        // TheSansB (W5 Plain body / W7 koppen) is de huisstijlfont van udenhout.nl. Die is
+        // niet publiek als webfont beschikbaar, dus alleen de naam staat vooraan de stack —
+        // wordt hij lokaal geïnstalleerd, pakt de browser 'm automatisch op. Figtree
+        // (self-hosted via next/font, zie layout.tsx) blijft de daadwerkelijk geladen
+        // fallback met een vergelijkbaar humanistisch karakter.
+        sans: ["TheSansB W5 Plain", "TheSansB", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        "sans-w7": ["TheSansB W7", "TheSansB", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        "sans-w3": ["TheSansB W3", "TheSansB", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
       },
       borderRadius: {
-        // Strak & flat: knoppen zijn volledig rond (rounded-full, hieronder ongemoeid);
-        // al het andere is nog maar nét afgerond — nauwelijks zichtbaar.
-        sm: "2px",
-        DEFAULT: "3px",
-        md: "3px",
-        lg: "4px",
-        xl: "4px",
-        "2xl": "5px",
-        "3xl": "6px",
+        // Udenhout.nl: duidelijk afgeronde kaarten en tabelkoppen (1rem), pil-knoppen
+        // blijven volledig rond (rounded-full, hieronder ongemoeid).
+        sm: "0.25rem",
+        DEFAULT: "0.375rem",
+        md: "0.5rem",
+        lg: "0.75rem",
+        xl: "1rem",
+        "2xl": "1rem",
+        "3xl": "1.5rem",
       },
       boxShadow: {
-        // Starbucks.nl is volledig plat: geen decoratieve schaduwen. De standaard-
-        // schaduwklassen zijn daarom uitgezet; vlakken worden onderscheiden door hun
-        // tint en een hairline-rand. glow/glow-sm blijven — uitsluitend als focus-ring
-        // voor toetsenbordnavigatie (toegankelijkheid).
-        sm: "none",
-        DEFAULT: "none",
-        md: "none",
-        lg: "none",
-        xl: "none",
-        "2xl": "none",
+        sm: "0 1px 2px 0 rgb(25 36 59 / 0.05)",
+        DEFAULT: "0 1px 3px 0 rgb(25 36 59 / 0.08)",
+        md: "0 3px 6px 0 rgb(25 36 59 / 0.10)",
+        lg: "0 10px 15px -3px rgb(25 36 59 / 0.10)",
+        xl: "0 10px 15px -3px rgb(25 36 59 / 0.12)",
+        "2xl": "0 10px 15px -3px rgb(25 36 59 / 0.12)",
         panel: "none",
-        soft: "none",
-        glow: "0 0 0 3px rgba(0,105,62,0.35)",
-        "glow-sm": "0 0 0 3px rgba(0,105,62,0.30)",
+        soft: "0 3px 6px 0 rgb(25 36 59 / 0.08)",
+        glow: "0 0 0 3px rgba(0,61,165,0.35)",
+        "glow-sm": "0 0 0 3px rgba(0,61,165,0.30)",
       },
     },
   },

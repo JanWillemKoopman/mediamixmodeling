@@ -4,8 +4,8 @@ import { humanizeError } from "@/lib/humanizeMessage";
 import { GuideModal } from "@/components/GuideModal";
 import type { JobStatus, ProjectStatus } from "@/lib/types";
 
-// Flat kaart: wit vlak zonder rand of schaduw, nauwelijks afgerond — onderscheiden
-// van het canvas door zijn tint.
+// Kaart met de afgeronde hoeken van de Udenhout-huisstijl (1rem via rounded-2xl),
+// onderscheiden van het canvas door zijn tint.
 export function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <div className={`rounded-2xl bg-surface ${className}`}>{children}</div>;
 }
@@ -19,12 +19,12 @@ export function Card({ children, className = "" }: { children: React.ReactNode; 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 const BUTTON_VARIANT: Record<ButtonVariant, string> = {
-  // Groene primaire pil-knop (witte tekst op House Green) — plat, geen schaduw.
+  // Helderblauwe primaire pil-knop (witte tekst op helderblauw) — de huisstijl-actiekleur.
   primary:
-    "bg-accent text-white font-semibold hover:bg-accent-hover disabled:bg-surface-3 disabled:text-fg-faint",
-  // Secundaire pil: dunne groene rand + groene tekst, transparant — zoals starbucks.nl.
+    "bg-accent text-white font-sans-w7 font-semibold hover:bg-accent-hover disabled:bg-surface-3 disabled:text-fg-faint",
+  // Secundaire pil: dunne helderblauwe rand + helderblauwe tekst, transparant.
   secondary:
-    "border border-accent/70 bg-transparent text-accent font-semibold hover:bg-accent-dim disabled:border-border disabled:text-fg-faint",
+    "border border-accent/70 bg-transparent text-accent font-sans-w7 font-semibold hover:bg-accent-dim disabled:border-border disabled:text-fg-faint",
   ghost: "text-fg-muted font-medium hover:bg-surface-2 hover:text-fg",
   danger: "border border-danger/40 bg-danger-dim text-danger font-medium hover:bg-danger/15",
 };
@@ -84,7 +84,7 @@ export function PageHeader({
   return (
     <div className="flex items-start justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-fg">{title}</h1>
+        <h1 className="text-2xl font-sans-w7 font-bold tracking-tight text-fg">{title}</h1>
         {subtitle && <p className="mt-1.5 text-sm text-fg-muted">{subtitle}</p>}
       </div>
       {action}

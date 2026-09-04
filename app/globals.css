@@ -24,27 +24,27 @@ body {
 }
 
 ::selection {
-  background: rgba(0, 105, 62, 0.16);
-  color: #182420;
+  background: rgba(0, 61, 165, 0.16);
+  color: #19243b;
 }
 
-/* Dunne, neutrale scrollbars — onopvallend op het lichtgrijze canvas. */
+/* Dunne scrollbars in het donkerblauw van de huisstijl — onopvallend op het witte canvas. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  scrollbar-color: rgba(25, 36, 59, 0.22) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(25, 36, 59, 0.2);
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(25, 36, 59, 0.32);
   background-clip: content-box;
 }
 

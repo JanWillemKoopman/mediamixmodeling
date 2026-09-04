@@ -297,7 +297,7 @@ function ActionsBlock({ summary, kpiMargin }: { summary: FitSummary; kpiMargin?:
   if (actions.length === 0) return null;
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-fg">Aanbevolen acties</h3>
+      <h3 className="text-sm font-sans-w7 font-bold text-fg">Aanbevolen acties</h3>
       <div className="space-y-2">
         {actions.map((a, i) => (
           <div key={i} className="flex gap-3 rounded-lg border border-border bg-surface-2/60 p-3">
@@ -376,7 +376,7 @@ function BudgetAdvice({
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-medium text-fg">Budgetadvies</h3>
+        <h3 className="text-sm font-sans-w7 font-bold text-fg">Budgetadvies</h3>
         <p className="text-sm text-fg-muted">
           Bij hetzelfde totale weekbudget van{" "}
           <span className="font-medium">{fmt(allocation.total_weekly_budget)}</span> haalt deze
@@ -391,31 +391,32 @@ function BudgetAdvice({
           Cijfers per kanaal (tabel)
         </summary>
         <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
+          <table className="w-full min-w-[560px] overflow-hidden rounded-2xl text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-fg-faint">
-                <th className="py-2 pr-4 font-medium">Kanaal</th>
-                <th className="py-2 pr-4 font-medium">Nu per week</th>
-                <th className="py-2 pr-4 font-medium">Advies per week</th>
-                <th className="py-2 pr-4 font-medium">Rendement volgende euro</th>
+              <tr className="bg-surface-3 text-left text-xs font-sans-w7 uppercase tracking-wide text-fg">
+                <th className="rounded-tl-2xl py-2.5 pr-4 pl-4 font-sans-w7">Kanaal</th>
+                <th className="py-2.5 pr-4 font-sans-w7">Nu per week</th>
+                <th className="py-2.5 pr-4 font-sans-w7">Advies per week</th>
+                <th className="rounded-tr-2xl py-2.5 pr-4 font-sans-w7">Rendement volgende euro</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {Object.entries(allocation.per_channel).map(([name, advised]) => {
+            <tbody>
+              {Object.entries(allocation.per_channel).map(([name, advised], i, arr) => {
                 const curve = byName.get(name);
                 const current = curve?.current_weekly_spend ?? 0;
                 const up = advised > current * 1.01;
                 const down = advised < current * 0.99;
+                const last = i === arr.length - 1;
                 return (
-                  <tr key={name}>
-                    <td className="py-3 pr-4 font-medium text-fg">{name}</td>
+                  <tr key={name} className={i % 2 === 1 ? "bg-surface-2" : "bg-surface"}>
+                    <td className={`py-3 pr-4 pl-4 font-medium text-fg ${last ? "rounded-bl-2xl" : ""}`}>{name}</td>
                     <td className="py-3 pr-4 text-fg-muted">{fmt(current)}</td>
                     <td className="py-3 pr-4">
                       <span className="font-medium text-fg">{fmt(advised)}</span>{" "}
                       {up && <span className="text-xs text-accent">↑</span>}
                       {down && <span className="text-xs text-fg-faint">↓</span>}
                     </td>
-                    <td className="py-3 pr-4">
+                    <td className={`py-3 pr-4 ${last ? "rounded-br-2xl" : ""}`}>
                       {curve ? (
                         <IntervalCell value={curve.marginal_roas_at_current} render={(n) => fmt(n, 2)} />
                       ) : (
@@ -459,56 +460,59 @@ export function SummaryView({
           Cijfers per kanaal (tabel)
         </summary>
         <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[640px] text-sm">
+        <table className="w-full min-w-[640px] overflow-hidden rounded-2xl text-sm">
           <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-fg-faint">
-              <th className="py-2 pr-4 font-medium">Kanaal</th>
-              <th className="py-2 pr-4 font-medium">Aandeel</th>
-              <th className="py-2 pr-4 font-medium">
+            <tr className="bg-surface-3 text-left text-xs font-sans-w7 uppercase tracking-wide text-fg">
+              <th className="rounded-tl-2xl py-2.5 pr-4 pl-4 font-sans-w7">Kanaal</th>
+              <th className="py-2.5 pr-4 font-sans-w7">Aandeel</th>
+              <th className="py-2.5 pr-4 font-sans-w7">
                 <Term definition={MMM_GLOSSARY.roas}>ROAS</Term>
               </th>
-              <th className="py-2 pr-4 font-medium">
+              <th className="py-2.5 pr-4 font-sans-w7">
                 <Term definition={MMM_GLOSSARY.adstock}>Doorwerking</Term>
               </th>
-              <th className="py-2 pr-4 font-medium">
+              <th className="py-2.5 pr-4 font-sans-w7">
                 <Term definition={MMM_GLOSSARY.saturation}>Verzadiging vanaf</Term>
               </th>
-              <th className="py-2 pr-4 font-medium">
+              <th className="py-2.5 pr-4 font-sans-w7">
                 <Term definition="Welk deel van de opbrengst in dezelfde week viel als de uitgave (direct); de rest is na-ijl — doorwerking in latere weken.">
                   Direct
                 </Term>
               </th>
-              <th className="py-2 pr-4 font-medium">
+              <th className="rounded-tr-2xl py-2.5 pr-4 font-sans-w7">
                 <Term definition="Hoe zeker het model is over dit kanaal — afgeleid van de breedte van de onzekerheidsband. Laag vertrouwen betekent meestal: te weinig of te weinig variërende data om dit kanaal scherp te schatten.">
                   Vertrouwen
                 </Term>
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
-            {summary.channels.map((ch) => (
-              <tr key={ch.name}>
-                <td className="py-3 pr-4 font-medium text-fg">{ch.name}</td>
-                <td className="py-3 pr-4">
-                  <IntervalCell value={ch.contribution_share} render={pct} />
-                </td>
-                <td className="py-3 pr-4">
-                  <IntervalCell value={ch.roas} render={(n) => fmt(n, 2)} />
-                </td>
-                <td className="py-3 pr-4">
-                  <IntervalCell value={ch.adstock_half_life_weeks} render={(n) => fmt(n, 1) + " wk"} />
-                </td>
-                <td className="py-3 pr-4">
-                  <IntervalCell value={ch.saturation_point} render={(n) => fmt(n)} />
-                </td>
-                <td className="py-3 pr-4">
-                  {ch.direct_share ? <IntervalCell value={ch.direct_share} render={pct} /> : <span className="text-fg-faint">—</span>}
-                </td>
-                <td className="py-3 pr-4">
-                  <ConfidencePill confidence={confidenceFromInterval(ch.roas)} />
-                </td>
-              </tr>
-            ))}
+          <tbody>
+            {summary.channels.map((ch, i, arr) => {
+              const last = i === arr.length - 1;
+              return (
+                <tr key={ch.name} className={i % 2 === 1 ? "bg-surface-2" : "bg-surface"}>
+                  <td className={`py-3 pr-4 pl-4 font-medium text-fg ${last ? "rounded-bl-2xl" : ""}`}>{ch.name}</td>
+                  <td className="py-3 pr-4">
+                    <IntervalCell value={ch.contribution_share} render={pct} />
+                  </td>
+                  <td className="py-3 pr-4">
+                    <IntervalCell value={ch.roas} render={(n) => fmt(n, 2)} />
+                  </td>
+                  <td className="py-3 pr-4">
+                    <IntervalCell value={ch.adstock_half_life_weeks} render={(n) => fmt(n, 1) + " wk"} />
+                  </td>
+                  <td className="py-3 pr-4">
+                    <IntervalCell value={ch.saturation_point} render={(n) => fmt(n)} />
+                  </td>
+                  <td className="py-3 pr-4">
+                    {ch.direct_share ? <IntervalCell value={ch.direct_share} render={pct} /> : <span className="text-fg-faint">—</span>}
+                  </td>
+                  <td className={`py-3 pr-4 ${last ? "rounded-br-2xl" : ""}`}>
+                    <ConfidencePill confidence={confidenceFromInterval(ch.roas)} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         </div>
