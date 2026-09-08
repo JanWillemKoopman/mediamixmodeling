@@ -7,9 +7,10 @@ import {
   SCENARIO,
   estimateScenario,
 } from "@/lib/site/exampleData";
+import { SITE } from "@/lib/site/copy";
 import { nl, signedPct } from "@/lib/site/format";
 import { Anim, Reveal } from "./motion";
-import { Container, PanelLabel, Section, SectionHead } from "./primitives";
+import { Button, Container, PanelLabel, Section, SectionHead } from "./primitives";
 
 /**
  * Sectie 08 — de voorbeeldcase. Laat in één doorlopend verhaal zien hoe rapportage,
@@ -153,6 +154,18 @@ export function CaseSection() {
               op klantdata.
             </p>
           </Anim>
+        </Reveal>
+
+        {/* Conversiemoment halverwege: de bezoeker heeft het hele verhaal net gezien. */}
+        <Reveal delay={80}>
+          <div className="mt-8 flex flex-col items-start justify-between gap-4 rounded-panel border border-site-line bg-white px-5 py-5 sm:flex-row sm:items-center sm:px-7">
+            <p className="max-w-xl text-[1.0625rem] leading-snug text-site-text">
+              Benieuwd hoe dit beeld eruitziet voor jouw kanalen en jouw resultaatcijfers?
+            </p>
+            <Button href="#demo" arrow className="shrink-0">
+              {SITE.ctaPrimary}
+            </Button>
+          </div>
         </Reveal>
       </Container>
     </Section>
