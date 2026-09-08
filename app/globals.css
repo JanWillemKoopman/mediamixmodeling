@@ -88,3 +88,158 @@ body {
     break-inside: avoid;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Publieke one-page (app/page.tsx + components/site/)
+
+   Alles hieronder is gescopet op .site-* en raakt de applicatie niet. Uitgangspunt:
+   de volledige inhoud is standaard zichtbaar en in de eindstand. Pas wanneer er
+   JavaScript is (html.js, gezet vóór de eerste paint in layout.tsx) starten
+   onthullingen en de balkanimatie in hun beginstand — zonder JS mist de bezoeker
+   dus animatie, geen informatie.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+html {
+  scroll-behavior: smooth;
+}
+
+.site-anchor {
+  scroll-margin-top: 5rem;
+}
+
+/* Gestaffelde onthulling bij in beeld komen. --d = extra vertraging per element. */
+html.js .site-reveal {
+  opacity: 0;
+  transform: translateY(14px);
+}
+html.js .site-reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 600ms cubic-bezier(0.22, 1, 0.36, 1) var(--d, 0ms),
+    transform 600ms cubic-bezier(0.22, 1, 0.36, 1) var(--d, 0ms);
+}
+
+/* De twee balken: het effect-segment staat in rust op de breedte van het budget-segment
+   (--w0) en beweegt naar zijn eigen breedte (--w) zodra de figuur in beeld komt. Dat
+   verschil ís het argument van de pagina. */
+.site-seg {
+  width: var(--w);
+}
+html.js .site-figure .site-seg--effect {
+  width: var(--w0);
+  transition: width 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+html.js .site-figure.is-in .site-seg--effect {
+  width: var(--w);
+}
+html.js .site-figure .site-links {
+  opacity: 0;
+}
+html.js .site-figure.is-in .site-links {
+  opacity: 1;
+  transition: opacity 500ms ease 550ms;
+}
+
+/* Schuifregelaar: één bediening, groot genoeg voor een vinger, met een duidelijke
+   focusring voor toetsenbordgebruik. */
+.site-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 44px;
+  background: transparent;
+  cursor: pointer;
+}
+.site-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(20, 28, 47, 0.16);
+}
+.site-range::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(20, 28, 47, 0.16);
+}
+.site-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 26px;
+  width: 26px;
+  margin-top: -11px;
+  border-radius: 9999px;
+  background: #0f5099;
+  border: 3px solid #fbfaf7;
+  box-shadow: 0 1px 4px rgba(20, 28, 47, 0.3);
+}
+.site-range::-moz-range-thumb {
+  height: 26px;
+  width: 26px;
+  border-radius: 9999px;
+  background: #0f5099;
+  border: 3px solid #fbfaf7;
+  box-shadow: 0 1px 4px rgba(20, 28, 47, 0.3);
+}
+.site-range:focus-visible {
+  outline: none;
+}
+.site-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(15, 80, 153, 0.35);
+}
+.site-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px rgba(15, 80, 153, 0.35);
+}
+
+/* Op de donkere statement-sectie staat dezelfde regelaar op inkt. */
+.site-range--ink::-webkit-slider-runnable-track,
+.site-range--ink::-moz-range-track {
+  background: rgba(255, 255, 255, 0.24);
+}
+.site-range--ink::-webkit-slider-thumb {
+  background: #8fb8f2;
+  border-color: #111a2b;
+}
+.site-range--ink::-moz-range-thumb {
+  background: #8fb8f2;
+  border-color: #111a2b;
+}
+
+/* Toetsenbordfocus is overal zichtbaar, met genoeg contrast op zowel het lichte canvas als
+   de donkere statement-secties. */
+#top a:focus-visible,
+#top button:focus-visible,
+#top summary:focus-visible,
+#top input:focus-visible,
+#top select:focus-visible,
+#top textarea:focus-visible {
+  outline: 2px solid #0f5099;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+#top .bg-site-ink a:focus-visible,
+#top .bg-site-ink button:focus-visible,
+#top .bg-site-ink input:focus-visible,
+#top .bg-site-ink select:focus-visible,
+#top .bg-site-ink textarea:focus-visible {
+  outline-color: #8fb8f2;
+}
+
+/* Beweging is nooit de drager van betekenis: uit betekent direct de eindstand. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  html.js .site-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  html.js .site-figure .site-seg--effect {
+    width: var(--w);
+    transition: none;
+  }
+  html.js .site-figure .site-links {
+    opacity: 1;
+    transition: none;
+  }
+}

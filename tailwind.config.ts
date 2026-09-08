@@ -9,6 +9,31 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // ── Marketingpagina (app/page.tsx + components/site/) ────────────────────────
+        // Eigen, additieve tokenset voor de publieke one-page. Staat bewust náást de
+        // app-tokens hieronder: de wizard en het klantdashboard veranderen hier niet van,
+        // en de marketingpagina erft omgekeerd niet de applicatie-esthetiek.
+        // Kleurregel van de pagina: bestedingen zijn neutraal, effect is blauw.
+        site: {
+          ink: "#111A2B", // diep statementvlak
+          "ink-2": "#1B2740", // verhoogd vlak op inkt
+          canvas: "#FBFAF7", // warm off-white
+          sand: "#F1EDE6", // afwisselingsvlak
+          text: "#141C2F",
+          "text-muted": "#4A5468",
+          "text-faint": "#636C7D",
+          "on-ink": "#F4F2EE",
+          "on-ink-muted": "#AEB9CC",
+          line: "rgba(20,28,47,0.12)",
+          "line-strong": "rgba(20,28,47,0.26)",
+          "line-ink": "rgba(255,255,255,0.16)",
+          effect: "#0F5099", // signaalkleur: media-effect én primaire actie
+          "effect-hover": "#0A3D77",
+          "effect-soft": "#E9F1FB",
+          "effect-ink": "#8FB8F2", // dezelfde signaalkleur, leesbaar op inkt
+          accent: "#ED6935", // spaarzaam: markeert de kloof tussen budget en effect
+          "accent-text": "#B54A1A", // dezelfde signaalkleur, maar leesbaar als tekst (AA)
+        },
         // Wit canvas — Udenhout.nl-secties wisselen wit af met lichtbeige vlakken.
         bg: "#FFFFFF",
         surface: {
@@ -66,6 +91,9 @@ const config: Config = {
         },
       },
       fontFamily: {
+        // Display-serif van de marketingpagina (self-hosted via next/font, zie layout.tsx).
+        // Alleen gebruikt op grote koppen; body blijft de humanistische sans hieronder.
+        display: ["var(--font-display)", "ui-serif", "Georgia", "serif"],
         // TheSansB (W5 Plain body / W7 koppen) is de huisstijlfont van udenhout.nl. Die is
         // niet publiek als webfont beschikbaar, dus alleen de naam staat vooraan de stack —
         // wordt hij lokaal geïnstalleerd, pakt de browser 'm automatisch op. Figtree

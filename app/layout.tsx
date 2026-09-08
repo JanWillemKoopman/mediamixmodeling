@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Figtree } from "next/font/google";
+import { Figtree, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 
 // Strakke, moderne typografie in de geest van Starbucks' SoDo Sans: één heldere,
@@ -12,9 +12,18 @@ const sans = Figtree({
   display: "swap",
 });
 
+// Display-serif voor de publieke one-page: één gewicht, latin-subset, self-hosted. Levert
+// het editoriale karakter dat de pagina onderscheidt van een standaard SaaS-landingspagina.
+const display = Instrument_Serif({
+  subsets: ["latin"],
+  weight: "400",
+  variable: "--font-display",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "MMM Wizard",
-  description: "Bouw een Bayesiaans media mix model en publiceer een klantdashboard.",
+  title: "media mix modeling",
+  description: "Inzicht in het effect van je mediabudget.",
 };
 
 // maximumScale voorkomt dat iOS Safari bij focus op een invoerveld automatisch inzoomt
@@ -29,7 +38,15 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="nl" className={sans.variable}>
+    <html lang="nl" className={`${sans.variable} ${display.variable}`}>
+      <head>
+        {/* Zet de js-vlag vóór de eerste paint. Alle inhoud is standaard zichtbaar; alleen
+            mét JavaScript starten onthullings- en balkanimaties in hun beginstand, zodat de
+            pagina zonder JS volledig leesbaar blijft in plaats van leeg. */}
+        <script
+          dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('js')" }}
+        />
+      </head>
       <body className="font-sans">{children}</body>
     </html>
   );

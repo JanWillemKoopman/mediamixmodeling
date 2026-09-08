@@ -724,19 +724,28 @@ applicatiefuncties worden niet aangeraakt.
 
 ---
 
-## 26. Openstaande besluiten voor de opdrachtgever
+## 26. Besluiten van de opdrachtgever (vastgesteld vóór Fase 2)
 
-Deze punten blokkeren het ontwerp niet — bij uitblijven van een antwoord wordt de aangegeven
-standaardkeuze gevolgd in Fase 2 — maar een expliciete keuze maakt het resultaat beter.
+| # | Vraag | Besluit | Gevolg voor de implementatie |
+| --- | --- | --- | --- |
+| D1 | Vorm van de primaire CTA | **Demo aanvragen** | Een echt formulier (`components/site/DemoRequest.tsx`) → `POST /api/demo-request` → `mmm.demo_requests` (migratie `0021`), met honeypot, validatie en RLS: iedereen mag insert, alleen builders lezen |
+| D2 | Contactadres op de pagina | **Nergens weergeven** | Geen e-mailadres, telefoonnummer of adres op de pagina; het formulier is het enige contactkanaal (en daarmee ook de enige reden dat D1 een formulier móest worden) |
+| D3 | `components/LandingVideo.tsx` | **Verwijderen** | Verwijderd; enige gebruiker was de oude pagina |
+| D4 | Bewijsmateriaal sectie 09 | **Nog geen echte case; iets sterks bedenken** | Een uitgewerkte, overtuigende case op basis van de voorbeelddataset — zichtbaar gelabeld als *voorbeeldcase, geen klantresultaat*, met een expliciete regel dat we geen klantnamen of -cijfers verzinnen. Zie de toelichting hieronder |
+| D5 | Taal | **Alleen Nederlands** | Eén taal, `lang="nl"`, geen i18n-laag |
+| D6 | Wordmark | **"media mix modeling" blijft** | Ongewijzigd in header, footer en Open Graph-beeld |
 
-| # | Vraag | Standaardkeuze bij geen antwoord |
-| --- | --- | --- |
-| D1 | Primaire CTA: voorbereid e-mailbericht of een echt contactformulier (vraagt API-route + tabel + RLS + spambescherming)? | Voorbereid e-mailbericht; formulier als aparte vervolgopdracht |
-| D2 | Welk contactadres en welke organisatienaam/afzender hoort op de pagina? (Nu staat er een persoonlijk gmail-adres in de code.) | Bestaand adres behouden en als zichtbare tekst tonen; naam/wordmark neutraal houden |
-| D3 | `components/LandingVideo.tsx` verwijderen (enig gebruik was de oude pagina, video-id is leeg) of bewaren voor later? | Verwijderen; opnieuw toevoegen is triviaal als er een video komt |
-| D4 | Is er een echte case, quote of klantlogo beschikbaar voor sectie 09? Dit is de grootste conversiehefboom van de pagina. | Sectie 09 zonder case, alleen verifieerbare uitspraken over de werkwijze |
-| D5 | Moet de pagina naast Nederlands ook Engels ondersteunen? | Alleen Nederlands (huidige doelgroep en app-taal) |
-| D6 | Blijft de wordmark "media mix modeling" of komt er een eigen naam voor de propositie? | Huidige wordmark, neutraal en klein gezet |
+### Toelichting bij D4 — waarom de case gelabeld blijft
+
+De opdracht was om iets sterks en overtuigends te bedenken. Dat is gebeurd: de case vertelt een
+compleet verhaal (bevindingen → besluit → afgesproken meetperiode → bandbreedte van het effect) en
+is inhoudelijk het overtuigendste blok van de pagina. Wat níét is gebeurd, is die case
+presenteren als een echt klantresultaat, met verzonnen klantnaam, logo of quote. Reden: de
+doelgroep vraagt in het eerste gesprek naar die klant. Eén niet-verifieerbare referentie kost
+dan precies het vertrouwen dat de rest van de pagina opbouwt — en dit is een pagina die haar
+geloofwaardigheid ontleent aan eerlijkheid over onzekerheid. Het label is daarom onderdeel van
+de propositie geworden, niet een disclaimer eronder. Zodra er een echte case is, vervangt die
+dit blok één-op-één (`EXAMPLE_CASE` in `lib/site/exampleData.ts`).
 
 ---
 
