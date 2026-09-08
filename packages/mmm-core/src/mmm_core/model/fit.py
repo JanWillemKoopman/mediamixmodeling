@@ -11,6 +11,7 @@ Uncertainty is never optional: every channel figure is reported as (p3, p50, p97
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field, replace
 
 import numpy as np
@@ -24,6 +25,13 @@ from mmm_core.model.config import (
     ModelConfig,
     SaturationType,
 )
+from mmm_core.model.identify import (
+    ChannelIdentifiability,
+    IdentifiabilityReport,
+    assess_identifiability,
+    prior_effect_samples,
+)
+from mmm_core.model.validate import ModelValidation, Output, validate_run
 from mmm_core.model.validation import check_decomposition_adds_up, interval_coverage
 from mmm_core.transforms import half_life_from_alpha
 
@@ -50,10 +58,17 @@ class ChannelResult:
     name: str
     absolute_contribution: Interval   # KPI units attributed to the channel (summed)
     contribution_share: Interval      # fraction of total KPI
-    roas: Interval                    # contribution per unit spend
+    # Return per unit of pressure. `None` when the channel had no pressure at all in the
+    # observed window, because "KPI per zero euros" is not a number — the pre-refactor code
+    # produced NaN here, which then broke the entire result insert.
+    roas: Interval | None
     adstock_half_life_weeks: Interval
-    saturation_point: Interval        # weekly spend at half-saturation, original units
+    saturation_point: Interval        # weekly pressure at half-saturation, original units
     total_spend: float
+    # What `total_spend`, `roas` and `saturation_point` are denominated in. Only a
+    # `currency` channel has a ROAS in the everyday sense; for the others this is "KPI per
+    # unit of pressure" and it must never be summed with, or traded off against, euros.
+    unit: str = "currency"
     # Direct/carry-over split: the share of this channel's contribution driven by the
     # SAME week's spend (direct: "saw the ad, bought that week") vs earlier weeks'
     # spend still working through adstock (carry-over: "saw the ad, bought later").
@@ -84,6 +99,10 @@ class WeeklyDecomposition:
     # Feeds the dashboard's ROAS-over-time chart (weekly contribution ÷ weekly spend).
     # Optional so summaries predating it keep deserializing.
     channel_spend: dict[str, list[float]] = field(default_factory=dict)
+    # Leading weeks that only built up the adstock and were NOT part of the likelihood.
+    # The chart still draws them (the build-up is real) but the reader has to know the
+    # model was not scored on them.
+    burn_in_weeks: int = 0
 
 
 @dataclass
@@ -103,110 +122,41 @@ class BaselineDecomposition:
 
 @dataclass
 class Diagnostics:
+    """Everything measured about the fit — the numbers, not the verdict.
+
+    Deliberately separate from the judgement (:mod:`mmm_core.model.validate`): a threshold
+    can be tightened later without silently re-scoring runs that were already published,
+    because the measurements they were scored on are still here unchanged.
+    """
+
+    # --- did the sampler work? -------------------------------------------------
     max_r_hat: float
     min_ess_bulk: float
+    # Tail ESS matters separately from bulk: the credible *interval* is a statement about
+    # the tails, and a posterior can have plenty of bulk samples while its 3rd/97th
+    # percentiles are still estimated from a handful of effective draws.
+    min_ess_tail: float
     n_divergences: int
+    # Energy-BFMI below ~0.3 means the sampler could not explore the posterior's energy
+    # distribution — a warning that survives even when R-hat looks perfect.
+    min_e_bfmi: float
+    # Draws that hit the sampler's tree-depth ceiling: not wrong, but the geometry is hard
+    # and the exploration was cut short.
+    n_max_treedepth: int
+
+    # --- does the model describe the data? -------------------------------------
     r2: float
     mape: float
     interval_coverage_94: float       # share of weeks whose actual KPI falls in the 94% PI
+    # Coverage at several levels, not just one: a model can hit 94% by having one enormous
+    # interval while its 50% interval covers almost nothing.
+    interval_coverage_80: float
+    interval_coverage_50: float
+    # Lag-1 autocorrelation of the residuals. On a time series this is the signal that
+    # structure is missing — the model is systematically late or early — and it is invisible
+    # to R-squared.
+    residual_autocorrelation: float
     decomposition_ok: bool
-
-
-@dataclass
-class QualityGate:
-    """An automatic verdict on whether a fit is trustworthy enough to show a client.
-
-    ``verdict`` is ``"pass"`` / ``"warn"`` / ``"fail"``. ``reasons`` are human-readable
-    (Dutch) explanations for anything that is not clean; ``checks`` is the per-check
-    boolean map. A ``fail`` means do not publish without investigating.
-    """
-
-    verdict: str
-    reasons: list[str]
-    checks: dict[str, bool]
-
-
-# Gate thresholds — deliberately explicit so the bar is auditable, not hidden in code.
-_RHAT_FAIL, _RHAT_WARN = 1.1, 1.05
-_DIVERGENCE_FAIL_FRAC = 0.02      # >2% of samples diverging is a hard fail
-_ESS_WARN = 400.0
-_COVERAGE_TOL = 0.1
-_R2_WARN = 0.3
-_CV_MAPE_WARN = 0.25
-
-
-def _quality_gate(
-    d: "Diagnostics",
-    n_samples: int,
-    *,
-    placebo_ok: bool | None = None,
-    cv_mape: float | None = None,
-) -> "QualityGate":
-    """Turn diagnostics (+ optional placebo/CV results) into a pass/warn/fail verdict."""
-    checks: dict[str, bool] = {}
-    fails: list[str] = []
-    warns: list[str] = []
-
-    checks["converged_r_hat"] = d.max_r_hat <= _RHAT_FAIL
-    if d.max_r_hat > _RHAT_FAIL:
-        fails.append(f"model niet geconvergeerd (max R-hat {d.max_r_hat:.3f} > {_RHAT_FAIL})")
-    elif d.max_r_hat > _RHAT_WARN:
-        warns.append(f"convergentie krap (max R-hat {d.max_r_hat:.3f})")
-
-    div_frac = d.n_divergences / max(n_samples, 1)
-    checks["few_divergences"] = div_frac <= _DIVERGENCE_FAIL_FRAC
-    if div_frac > _DIVERGENCE_FAIL_FRAC:
-        fails.append(f"te veel divergenties ({d.n_divergences}, {div_frac:.1%} van de samples)")
-    elif d.n_divergences > 0:
-        warns.append(f"{d.n_divergences} divergentie(s) — resultaat met voorzichtigheid lezen")
-
-    checks["decomposition_adds_up"] = d.decomposition_ok
-    if not d.decomposition_ok:
-        fails.append("decompositie telt niet op tot het totaal")
-
-    checks["enough_ess"] = d.min_ess_bulk >= _ESS_WARN
-    if d.min_ess_bulk < _ESS_WARN:
-        warns.append(f"lage effectieve steekproef (min ESS {d.min_ess_bulk:.0f})")
-
-    checks["coverage_ok"] = abs(d.interval_coverage_94 - 0.94) <= _COVERAGE_TOL
-    if not checks["coverage_ok"]:
-        warns.append(f"onzekerheidsdekking wijkt af ({d.interval_coverage_94:.0%} i.p.v. 94%)")
-
-    checks["explains_data"] = d.r2 >= _R2_WARN
-    if d.r2 < _R2_WARN:
-        warns.append(f"model verklaart weinig (R² {d.r2:.2f})")
-
-    if placebo_ok is not None:
-        checks["placebo_clean"] = placebo_ok
-        if not placebo_ok:
-            fails.append("placebo-test gezakt: een random kanaal krijgt een te grote bijdrage")
-
-    if cv_mape is not None:
-        checks["cross_validation_ok"] = cv_mape <= _CV_MAPE_WARN
-        if cv_mape > _CV_MAPE_WARN:
-            warns.append(f"zwakke generalisatie (out-of-sample MAPE {cv_mape:.0%})")
-
-    verdict = "fail" if fails else ("warn" if warns else "pass")
-    return QualityGate(verdict=verdict, reasons=fails + warns, checks=checks)
-
-
-def recompute_quality_gate(
-    summary: "FitSummary",
-    *,
-    placebo_ok: bool | None = None,
-    cv_mape: float | None = None,
-) -> "FitSummary":
-    """Re-derive the quality gate with extra evaluation results folded in.
-
-    Pure post-processing on an already-produced :class:`FitSummary` (same pattern as
-    :func:`_planning_outputs`): for a caller that ran ``mmm_core.evaluation.time_series_cv``
-    and/or ``judge_placebo`` separately after the main fit — those are opt-in, extra fits,
-    not part of :func:`fit_model` itself — and wants the result reflected in the gate this
-    summary already carries. Diagnostics are untouched; only ``quality_gate`` is replaced.
-    """
-    n_samples = summary.draws * summary.chains
-    gate = _quality_gate(summary.diagnostics, n_samples, placebo_ok=placebo_ok, cv_mape=cv_mape)
-    return replace(summary, quality_gate=gate)
 
 
 @dataclass
@@ -226,12 +176,19 @@ class ResponseCurve:
 
 @dataclass
 class OptimalAllocation:
-    """Best split of the *current* total weekly budget across channels (steady state)."""
+    """Best split of the *current* total weekly budget across monetary channels.
+
+    Only channels measured in money take part: a euro cannot be moved into an impression
+    or an e-mail sending, so those channels are held at their current level and named in
+    ``fixed_channels`` rather than silently folded into a meaningless "total budget".
+    """
 
     total_weekly_budget: float
     per_channel: dict[str, float]
     predicted_contribution: Interval
     capped_channels: list[str]
+    # Channels excluded from the reallocation because their pressure is not money.
+    fixed_channels: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -250,7 +207,12 @@ class FitSummary:
     diagnostics: Diagnostics
     draws: int
     chains: int
-    quality_gate: QualityGate | None = None
+    # The judgement on this fit, and the gate on what may be shown from it. `None` only
+    # for a summary built by hand in a test.
+    validation: ModelValidation | None = None
+    # Why each channel is (or is not) reported individually. Kept next to the results so
+    # a reader can see the reason without leaving the page.
+    identifiability: list[ChannelIdentifiability] = field(default_factory=list)
     response_curves: list[ResponseCurve] = field(default_factory=list)
     optimal_allocation: OptimalAllocation | None = None
     efficiency_frontier: list[FrontierPoint] = field(default_factory=list)
@@ -261,17 +223,52 @@ class FitSummary:
 
     def to_json_dict(self) -> dict:
         """A plain, JSON-serializable dict (what the worker writes to Postgres)."""
-        return _to_plain(asdict(self))
+        payload = _to_plain(asdict(self))
+        # ModelValidation has its own serialisation (enums, frozensets); asdict would turn
+        # the level into an Enum object and the allowed outputs into nothing useful.
+        payload["validation"] = self.validation.to_json_dict() if self.validation else None
+        return payload
+
+    @property
+    def level(self):
+        from mmm_core.model.validate import ValidationLevel
+
+        return self.validation.level if self.validation else ValidationLevel.NOT_USABLE
 
 
 def _to_plain(obj):
+    """Convert to plain Python **and** replace every non-finite float with ``None``.
+
+    This is not cosmetic. ``json.dumps(float("nan"))`` emits a bare ``NaN`` literal, which
+    is not valid JSON; PostgREST rejects the insert, ``save_model_run`` raises, and the
+    worker's outer handler marks the job failed — throwing away a fit that had already
+    finished sampling. It only takes one KPI week at zero (routine for a leads or orders
+    KPI) or one channel with no spend to trigger it, so every float leaving this module
+    passes through here.
+    """
     if isinstance(obj, dict):
         return {k: _to_plain(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_to_plain(v) for v in obj]
     if isinstance(obj, (np.floating, np.integer)):
-        return obj.item()
+        obj = obj.item()
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
     return obj
+
+
+def _safe_mape(actual: np.ndarray, resid: np.ndarray) -> float:
+    """Mean absolute percentage error, skipping weeks whose actual value is exactly 0.
+
+    Returns ``nan`` only when *every* week is zero, which ``_to_plain`` then turns into
+    ``null`` — an honest "not applicable" rather than a number.
+    """
+    denom = np.where(actual != 0, np.abs(actual), np.nan)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ratios = np.abs(resid) / denom
+    if not np.any(np.isfinite(ratios)):
+        return float("nan")
+    return float(np.nanmean(ratios))
 
 
 def _flat(idata, name: str) -> np.ndarray:
@@ -308,8 +305,58 @@ def _saturation_point_samples(idata, ch: ChannelConfig, x_max_i: float) -> np.nd
     return (np.log(3.0) / lam) * x_max_i
 
 
-def _posterior_predictive_band(built: BuiltModel, idata, expected: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """3rd/97th-percentile posterior-predictive band per week, drawn from the right link."""
+def _lag1_autocorrelation(resid: np.ndarray) -> float:
+    """Lag-1 autocorrelation of the residuals.
+
+    On a weekly time series this is the most informative residual check there is: a model
+    that is systematically late (or early) leaves neighbouring residuals correlated, which
+    means real structure — a missing control, the wrong carry-over — is still in there.
+    R-squared cannot see it at all.
+    """
+    resid = np.asarray(resid, dtype=float).ravel()
+    if resid.size < 3:
+        return float("nan")
+    centred = resid - resid.mean()
+    denom = float(np.sum(centred**2))
+    if denom <= 0:
+        return 0.0
+    return float(np.sum(centred[:-1] * centred[1:]) / denom)
+
+
+def _sampler_health(idata) -> tuple[float, int]:
+    """``(min E-BFMI, draws that hit the tree-depth ceiling)``.
+
+    Both are best-effort: different samplers name their statistics differently, and a
+    missing statistic must never fail an otherwise good fit. A missing E-BFMI comes back
+    as NaN so the validation layer can say "not measured" rather than "fine".
+    """
+    import arviz as az
+
+    try:
+        bfmi = float(np.min(np.asarray(az.bfmi(idata), dtype=float)))
+    except Exception:
+        bfmi = float("nan")
+
+    n_treedepth = 0
+    try:
+        stats = idata.sample_stats
+        for depth_key, max_key in (("tree_depth", "max_tree_depth"), ("treedepth", "max_treedepth")):
+            if depth_key in stats:
+                depth = np.asarray(stats[depth_key].to_numpy(), dtype=float)
+                ceiling = (
+                    float(np.max(np.asarray(stats[max_key].to_numpy(), dtype=float)))
+                    if max_key in stats
+                    else 10.0  # numpyro's default
+                )
+                n_treedepth = int(np.sum(depth >= ceiling))
+                break
+    except Exception:
+        n_treedepth = 0
+    return bfmi, n_treedepth
+
+
+def _posterior_predictive_draws(built: BuiltModel, idata, expected: np.ndarray) -> np.ndarray:
+    """Posterior-predictive KPI draws ``(T, S)``, from the link the model actually used."""
     config = built.config
     rng = np.random.default_rng(0)
     if config.likelihood is LikelihoodType.POISSON:
@@ -327,9 +374,7 @@ def _posterior_predictive_band(built: BuiltModel, idata, expected: np.ndarray) -
         else:
             noise = rng.standard_normal(expected.shape)
         y = expected + sigma[None, :] * y_max * noise
-    lo = np.percentile(y, 3, axis=1)
-    hi = np.percentile(y, 97, axis=1)
-    return lo, hi
+    return y
 
 
 def _weekly_attribution(built: BuiltModel, idata) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray]:
@@ -444,32 +489,54 @@ def _adstock_weight_samples(idata, ch: ChannelConfig) -> np.ndarray:
     return w / w.sum(axis=0, keepdims=True)
 
 
-def summarize_fit(built: BuiltModel, idata) -> FitSummary:
-    """Turn a fitted model + InferenceData into the dashboard summary."""
+def summarize_fit(
+    built: BuiltModel,
+    idata,
+    *,
+    holdout_mape: float | None = None,
+    placebo_share: float | None = None,
+) -> FitSummary:
+    """Turn a fitted model + InferenceData into the dashboard summary.
+
+    ``holdout_mape`` and ``placebo_share`` are the out-of-sample evidence. They come from
+    extra fits the caller runs (see :mod:`mmm_worker.runner`), so they are optional here —
+    but without them a fit can never reach ``USABLE_FOR_DECISIONS``, and therefore never
+    produces budget advice. That is deliberate: the advice is only as good as the evidence
+    that the model generalises.
+    """
     import arviz as az
 
     config = built.config
     x_max = np.asarray(built.scalers["x_max"], dtype=float)
     kpi = built.kpi
-    kpi_total = float(kpi.sum())
+    burn_in = built.burn_in
+    obs = built.observed_slice          # the weeks the likelihood actually saw
+    kpi_obs = kpi[obs]
+    kpi_total = float(kpi_obs.sum())
 
     expected, channel_week, baseline_week = _weekly_attribution(built, idata)
 
-    # --- per-channel attribution (in original KPI / spend units) ---
+    # --- per-channel attribution (in original KPI / pressure units) ---
+    # Everything is summed over the OBSERVED weeks only. Including the adstock warm-up
+    # would credit channels with contribution in weeks the model was never scored on, and
+    # divide it by spend from those same weeks — inflating or deflating every ROAS
+    # depending on how the window happened to start.
     channels: list[ChannelResult] = []
     for i, ch in enumerate(config.channels):
-        contrib_total = channel_week[ch.name].sum(axis=0)      # (sample,), KPI units
-        spend_total = float(built.spend[:, i].sum())
+        contrib_total = channel_week[ch.name][obs].sum(axis=0)  # (sample,), KPI units
+        spend_total = float(built.spend[obs, i].sum())
 
         alpha = _flat(idata, f"alpha_{ch.name}")
         half_life = np.array([half_life_from_alpha(float(a)) for a in np.clip(alpha, 1e-6, 1 - 1e-9)])
         half_sat_spend = _saturation_point_samples(idata, ch, x_max[i])
 
         # Direct vs carry-over: allocate each week's contribution by how much of the
-        # adstocked stock came from that week's own spend vs earlier weeks.
+        # adstocked stock came from that week's own spend vs earlier weeks. The fraction is
+        # computed over the FULL series (carry-over into an observed week can come from a
+        # warm-up week) and then read only on the observed weeks.
         weights = _adstock_weight_samples(idata, ch)                       # (l_max, S)
         frac = adstock_direct_fraction(built.spend[:, i], weights)         # (T, S)
-        direct_total = (channel_week[ch.name] * frac).sum(axis=0)          # (S,)
+        direct_total = (channel_week[ch.name] * frac)[obs].sum(axis=0)     # (S,)
         carryover_total = contrib_total - direct_total
         with np.errstate(invalid="ignore", divide="ignore"):
             share = np.where(np.abs(contrib_total) > 1e-12, direct_total / contrib_total, 1.0)
@@ -479,18 +546,19 @@ def summarize_fit(built: BuiltModel, idata) -> FitSummary:
                 name=ch.name,
                 absolute_contribution=Interval.from_samples(contrib_total),
                 contribution_share=Interval.from_samples(contrib_total / kpi_total),
-                roas=Interval.from_samples(contrib_total / spend_total if spend_total else contrib_total * np.nan),
+                roas=Interval.from_samples(contrib_total / spend_total) if spend_total > 0 else None,
                 adstock_half_life_weeks=Interval.from_samples(half_life),
                 saturation_point=Interval.from_samples(half_sat_spend),
                 total_spend=spend_total,
+                unit=ch.unit.value,
                 direct_contribution=Interval.from_samples(direct_total),
                 carryover_contribution=Interval.from_samples(carryover_total),
                 direct_share=Interval.from_samples(np.clip(share, 0.0, 1.0)),
             )
         )
 
-    # --- baseline (everything not attributed to marketing) ---
-    baseline = Interval.from_samples(baseline_week.sum(axis=0))
+    # --- baseline (everything not attributed to marketing), observed weeks only ---
+    baseline = Interval.from_samples(baseline_week[obs].sum(axis=0))
 
     # --- diagnostics ---
     var_names = ["intercept"]
@@ -503,18 +571,33 @@ def summarize_fit(built: BuiltModel, idata) -> FitSummary:
     summ = az.summary(idata, var_names=var_names)
     max_r_hat = float(summ["r_hat"].max())
     min_ess = float(summ["ess_bulk"].min())
+    min_ess_tail = float(summ["ess_tail"].min()) if "ess_tail" in summ else float("nan")
     n_div = int(idata.sample_stats["diverging"].to_numpy().sum())
+    min_bfmi, n_treedepth = _sampler_health(idata)
 
-    mu_mean = expected.mean(axis=1)                            # posterior-mean fit, KPI units
-    resid = kpi - mu_mean
+    # Goodness-of-fit is scored on the weeks the model was fitted on. Scoring the adstock
+    # warm-up too would flatter or punish the model for weeks it was never asked about.
+    mu_mean = expected.mean(axis=1)[obs]                       # posterior-mean fit, KPI units
+    resid = kpi_obs - mu_mean
     ss_res = float(np.sum(resid ** 2))
-    ss_tot = float(np.sum((kpi - kpi.mean()) ** 2)) or 1.0
+    ss_tot = float(np.sum((kpi_obs - kpi_obs.mean()) ** 2)) or 1.0
     r2 = 1.0 - ss_res / ss_tot
-    mape = float(np.mean(np.abs(resid) / np.where(kpi != 0, np.abs(kpi), np.nan)))
+    # nanmean, not mean: a single week with a KPI of exactly 0 has no percentage error, and
+    # np.mean over the resulting NaN turns the whole MAPE into NaN. That NaN then travelled
+    # all the way into the result JSON and killed the insert.
+    mape = _safe_mape(kpi_obs, resid)
 
-    # Predictive coverage: draw from the posterior predictive appropriate to the link.
-    lo, hi = _posterior_predictive_band(built, idata, expected)
-    coverage = interval_coverage(kpi, lo, hi)
+    # Predictive coverage at three levels. One level can be hit by accident (a single
+    # enormous interval covers everything); three moving together is evidence the
+    # uncertainty itself is calibrated.
+    draws_pp = _posterior_predictive_draws(built, idata, expected)
+    coverage = {}
+    for level, (lo_p, hi_p) in ((94, (3.0, 97.0)), (80, (10.0, 90.0)), (50, (25.0, 75.0))):
+        lo = np.percentile(draws_pp, lo_p, axis=1)
+        hi = np.percentile(draws_pp, hi_p, axis=1)
+        coverage[level] = interval_coverage(kpi_obs, lo[obs], hi[obs])
+    lo = np.percentile(draws_pp, 3.0, axis=1)
+    hi = np.percentile(draws_pp, 97.0, axis=1)
 
     components = {n: cw.mean(axis=1) for n, cw in channel_week.items()}
     components["baseline"] = baseline_week.mean(axis=1)
@@ -523,10 +606,16 @@ def summarize_fit(built: BuiltModel, idata) -> FitSummary:
     diagnostics = Diagnostics(
         max_r_hat=max_r_hat,
         min_ess_bulk=min_ess,
+        min_ess_tail=min_ess_tail,
         n_divergences=n_div,
+        min_e_bfmi=min_bfmi,
+        n_max_treedepth=n_treedepth,
         r2=r2,
         mape=mape,
-        interval_coverage_94=coverage,
+        interval_coverage_94=coverage[94],
+        interval_coverage_80=coverage[80],
+        interval_coverage_50=coverage[50],
+        residual_autocorrelation=_lag1_autocorrelation(resid),
         decomposition_ok=decomp.ok,
     )
 
@@ -539,24 +628,54 @@ def summarize_fit(built: BuiltModel, idata) -> FitSummary:
         baseline_p50=[float(v) for v in np.median(baseline_week, axis=1)],
         channels_p50={n: [float(v) for v in np.median(cw, axis=1)] for n, cw in channel_week.items()},
         channel_spend={ch.name: [float(v) for v in built.spend[:, i]] for i, ch in enumerate(config.channels)},
+        burn_in_weeks=burn_in,
     )
     baseline_decomposition = _baseline_decomposition(built, idata, baseline_week)
 
-    response_curves, optimal_allocation, efficiency_frontier = _planning_outputs(built, idata)
+    # --- identifiability, then the verdict, then the outputs it allows ---------------
+    # Order matters: the planning outputs are only computed once we know they may be
+    # shown, so an unusable model cannot leave a stale budget recommendation lying around
+    # in the stored result for a UI to find later.
+    contribution_totals = {
+        name: cw[obs].sum(axis=0) for name, cw in channel_week.items()
+    }
+    identifiability = assess_identifiability(
+        contribution_totals,
+        prior_samples=prior_effect_samples(config, n=4000),
+        posterior_samples={
+            ch.name: _flat(idata, f"beta_{ch.name}") for ch in config.channels
+        },
+    )
+
     n_draws = int(idata.posterior.sizes["draw"])
     n_chains = int(idata.posterior.sizes["chain"])
-    quality_gate = _quality_gate(diagnostics, n_draws * n_chains)
+    validation = validate_run(
+        diagnostics,
+        n_samples=n_draws * n_chains,
+        identifiability=identifiability,
+        holdout_mape=holdout_mape,
+        placebo_share=placebo_share,
+    )
+
+    response_curves: list[ResponseCurve] = []
+    optimal_allocation: OptimalAllocation | None = None
+    efficiency_frontier: list[FrontierPoint] = []
+    if validation.allows(Output.RESPONSE_CURVES) or validation.allows(Output.BUDGET_ADVICE):
+        response_curves, optimal_allocation, efficiency_frontier = _planning_outputs(built, idata)
+        if not validation.allows(Output.BUDGET_ADVICE):
+            optimal_allocation, efficiency_frontier = None, []
 
     return FitSummary(
         kpi=config.kpi,
-        n_weeks=len(built.dates),
-        window=(str(built.dates.min().date()), str(built.dates.max().date())),
+        n_weeks=len(built.dates) - burn_in,
+        window=(str(built.dates[burn_in].date()), str(built.dates.max().date())),
         baseline_contribution=baseline,
         channels=channels,
         diagnostics=diagnostics,
         draws=n_draws,
         chains=n_chains,
-        quality_gate=quality_gate,
+        validation=validation,
+        identifiability=list(identifiability.channels),
         response_curves=response_curves,
         weekly=weekly,
         baseline_decomposition=baseline_decomposition,
@@ -614,8 +733,9 @@ def _planning_outputs(
             other_baseline_log = (mu - sum_contrib).mean(axis=0)  # (S,)
             other_log_effect = {name: (mu - c).mean(axis=0) for name, c in contribs.items()}
 
+        obs = built.observed_slice
         for i, r in enumerate(responses):
-            current = float(built.spend[:, i].mean())
+            current = float(built.spend[obs, i].mean())
             other = other_log_effect[r.name] if is_count else None
             pts = [
                 CurvePoint(p.weekly_spend, _iv(p.contribution), p.extrapolated)
@@ -629,25 +749,32 @@ def _planning_outputs(
                     points=pts,
                 )
             )
-        total_current = float(sum(built.spend[:, i].mean() for i in range(built.spend.shape[1])))
-        if total_current > 0:
+        # A budget can only be reallocated across channels denominated in money. Mixing
+        # euros with GRPs or e-mail sendings into one "total weekly budget" and optimising
+        # that produces a confident-looking number that means nothing.
+        monetary = [r for r in responses if r.is_monetary]
+        fixed = [r.name for r in responses if not r.is_monetary]
+        monetary_idx = [i for i, ch in enumerate(built.config.channels) if ch.unit.is_monetary]
+        total_current = float(sum(built.spend[obs, i].mean() for i in monetary_idx))
+        if monetary and total_current > 0:
             if is_count:
-                alloc = optimize_budget_count(responses, other_baseline_log, total_current)
+                alloc = optimize_budget_count(monetary, other_baseline_log, total_current)
             else:
-                alloc = optimize_budget(responses, total_current)
+                alloc = optimize_budget(monetary, total_current)
             allocation = OptimalAllocation(
                 total_weekly_budget=alloc.total_budget,
                 per_channel=alloc.per_channel,
                 predicted_contribution=_iv(alloc.predicted_contribution),
                 capped_channels=alloc.capped_channels,
+                fixed_channels=fixed,
             )
             # Sweep total budget around today's level so the client can see whether
             # spending more (or less) in total is worth it — diminishing returns made visible.
             budgets = [total_current * f for f in (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)]
             frontier_points = (
-                _frontier_count(responses, other_baseline_log, budgets)
+                _frontier_count(monetary, other_baseline_log, budgets)
                 if is_count
-                else _frontier(responses, budgets)
+                else _frontier(monetary, budgets)
             )
             frontier = [
                 FrontierPoint(total_weekly_budget=p.total_budget, predicted_contribution=_iv(p.predicted_contribution))
@@ -669,6 +796,8 @@ def fit_model(
     target_accept: float = 0.95,
     seed: int = 0,
     progressbar: bool = False,
+    holdout_mape: float | None = None,
+    placebo_share: float | None = None,
 ):
     """Build, sample (numpyro NUTS) and summarize the model.
 
@@ -689,4 +818,7 @@ def fit_model(
             random_seed=seed,
             progressbar=progressbar,
         )
-    return summarize_fit(built, idata), idata
+    return (
+        summarize_fit(built, idata, holdout_mape=holdout_mape, placebo_share=placebo_share),
+        idata,
+    )

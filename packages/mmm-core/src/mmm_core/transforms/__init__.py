@@ -13,12 +13,14 @@ from mmm_core.transforms.adstock import (
     half_life_from_alpha,
 )
 from mmm_core.transforms.saturation import (
+    HILL_EPS,
     hill_saturation,
     logistic_saturation,
     saturation_half_point,
 )
 
 __all__ = [
+    "HILL_EPS",
     "adstock_weights",
     "alpha_from_half_life",
     "delayed_adstock",

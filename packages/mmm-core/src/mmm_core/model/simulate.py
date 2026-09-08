@@ -63,7 +63,26 @@ class SimulatedDataset:
 
 @dataclass(frozen=True)
 class ChannelDGP:
-    """Specification of one channel in the data-generating process."""
+    """Specification of one channel in the data-generating process.
+
+    Args:
+        name: Column name in the generated frame.
+        half_life: True adstock half-life in weeks.
+        half_saturation: True Hill half-saturation point, in raw spend units. Set it well
+            above the channel's typical weekly spend to simulate a channel that is *not*
+            yet saturated — the regime the pre-refactor Beta(0,1) prior could not represent.
+        beta: True effect ceiling in KPI units.
+        slope: True Hill slope.
+        spend_base: Centre of the simulated weekly spend.
+        spend_burstiness: 0 = flat spend, 1 = very bursty campaigns.
+        seasonal_spend_amplitude: Fraction of ``spend_base`` added as a yearly sine to the
+            spend itself. This is what makes a seasonality test *hard*: when media pressure
+            peaks at the same time as demand, an under-powered seasonal term hands the
+            seasonal peak to media.
+        spend: An explicit weekly spend series, overriding the simulated one. Used to build
+            deliberately collinear channels (two channels sharing a driver) so the
+            identifiability checks can be tested against a known answer.
+    """
 
     name: str
     half_life: float
@@ -72,15 +91,27 @@ class ChannelDGP:
     slope: float = 1.0
     spend_base: float = 100.0
     spend_burstiness: float = 0.6  # 0 = flat spend, 1 = very bursty campaigns
+    seasonal_spend_amplitude: float = 0.0
+    spend: np.ndarray | None = None
 
 
 def _simulate_spend(spec: ChannelDGP, n_weeks: int, rng: np.random.Generator) -> np.ndarray:
     """Positive, mildly bursty weekly spend for one channel."""
+    if spec.spend is not None:
+        spend = np.asarray(spec.spend, dtype=float)
+        if spend.shape != (n_weeks,):
+            raise ValueError(
+                f"channel {spec.name!r}: explicit spend has shape {spend.shape}, expected ({n_weeks},)"
+            )
+        return np.maximum(spend, 0.0)
     # AR(1)-ish log spend with occasional campaign bursts.
     noise = rng.normal(0, spec.spend_burstiness, n_weeks)
     log_spend = np.log(spec.spend_base) + np.cumsum(noise) * 0.15
     bursts = (rng.random(n_weeks) < 0.1) * rng.uniform(0.3, 1.0, n_weeks)
     spend = np.exp(log_spend) * (1.0 + bursts)
+    if spec.seasonal_spend_amplitude:
+        t = np.arange(n_weeks)
+        spend = spend * (1.0 + spec.seasonal_spend_amplitude * np.sin(2 * np.pi * t / 52.0))
     return np.maximum(spend, 0.0)
 
 

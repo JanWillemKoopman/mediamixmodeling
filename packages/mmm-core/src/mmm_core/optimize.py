@@ -22,8 +22,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# Numerical offset mirroring the model's saturation (mmm_core.model.build._HILL_EPS).
-_HILL_EPS = 1e-6
+from mmm_core.transforms import HILL_EPS as _HILL_EPS
 # Default safety margin above the historically tested maximum weekly spend.
 _DEFAULT_CAP_FACTOR = 1.2
 
@@ -70,6 +69,15 @@ class ChannelResponse:
     half_saturation: np.ndarray | None = None
     slope: np.ndarray | None = None
     lam: np.ndarray | None = None
+    # What this channel's pressure is measured in. Only "currency" channels may take part
+    # in budget optimisation: you cannot move a euro into an impression, and summing euros
+    # and e-mail sendings into one "total weekly budget" and redistributing it — which the
+    # pre-refactor optimiser did — produces a number with no meaning at all.
+    unit: str = "currency"
+
+    @property
+    def is_monetary(self) -> bool:
+        return self.unit == "currency"
 
     def _shape(self, u: float) -> np.ndarray:
         if self.saturation == "logistic":
@@ -218,6 +226,17 @@ def predict_total_contribution(
     return Interval.of(total)
 
 
+def _require_monetary(channels: list[ChannelResponse]) -> None:
+    """Refuse to optimise a budget across channels that are not denominated in money."""
+    non_monetary = [c.name for c in channels if not c.is_monetary]
+    if non_monetary:
+        raise ValueError(
+            f"cannot optimise a budget across non-currency channel(s) {non_monetary}: "
+            f"their pressure is not money, so reallocating a budget into them is undefined. "
+            f"Filter to monetary channels first."
+        )
+
+
 def optimize_budget(
     channels: list[ChannelResponse],
     total_budget: float,
@@ -243,6 +262,7 @@ def optimize_budget(
 
     if total_budget <= 0:
         raise ValueError("total_budget must be > 0")
+    _require_monetary(channels)
 
     min_spend = min_spend or {}
     max_spend = max_spend or {}
@@ -282,6 +302,10 @@ def optimize_budget(
     constraints = [{"type": "eq", "fun": lambda x: np.sum(x) - feasible_total}]
 
     res = minimize(neg_total, x0, method="SLSQP", bounds=bounds, constraints=constraints)
+    if not res.success:
+        # Presenting a non-converged simplex as "the optimal allocation" is worse than
+        # presenting nothing: the caller can fall back to reporting no advice at all.
+        raise RuntimeError(f"budget optimisation did not converge: {res.message}")
     alloc = {c.name: float(np.clip(xi, lo, hi)) for c, xi, lo, hi in zip(channels, res.x, lows, highs)}
 
     capped = [c.name for c, xi in zip(channels, res.x) if xi >= c.cap(cap_factor) - 1e-6]
@@ -360,6 +384,7 @@ def optimize_budget_count(
         raise ValueError("total_budget must be > 0")
     if not channels:
         raise ValueError("optimize_budget_count needs at least one channel")
+    _require_monetary(channels)
 
     min_spend = min_spend or {}
     max_spend = max_spend or {}
@@ -399,6 +424,8 @@ def optimize_budget_count(
     constraints = [{"type": "eq", "fun": lambda x: np.sum(x) - feasible_total}]
 
     res = minimize(neg_total, x0, method="SLSQP", bounds=bounds, constraints=constraints)
+    if not res.success:
+        raise RuntimeError(f"budget optimisation did not converge: {res.message}")
     alloc = {c.name: float(np.clip(xi, lo, hi)) for c, xi, lo, hi in zip(channels, res.x, lows, highs)}
     capped = [c.name for c, xi in zip(channels, res.x) if xi >= c.cap(cap_factor) - 1e-6]
 
@@ -467,6 +494,7 @@ def extract_channel_responses(built, idata) -> list[ChannelResponse]:
 
     y_max = float(built.scalers["y_max"])
     x_max = np.asarray(built.scalers["x_max"], dtype=float)
+    obs = built.observed_slice
     responses = []
     for i, ch in enumerate(built.config.channels):
         def flat(var):
@@ -477,7 +505,11 @@ def extract_channel_responses(built, idata) -> list[ChannelResponse]:
             beta=flat(f"beta_{ch.name}"),
             x_max=float(x_max[i]),
             y_max=y_max,
-            hist_max_weekly_spend=float(built.spend[:, i].max()),
+            # The extrapolation guard uses the highest spend the model was actually scored
+            # on, not the highest in the file: a spike inside the adstock warm-up was never
+            # evidence for anything.
+            hist_max_weekly_spend=float(built.spend[obs, i].max()),
+            unit=ch.unit.value,
         )
         if ch.saturation is SaturationType.LOGISTIC:
             responses.append(ChannelResponse(saturation="logistic", lam=flat(f"lam_{ch.name}"), **common))

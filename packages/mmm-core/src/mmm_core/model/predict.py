@@ -19,13 +19,13 @@ import pandas as pd
 
 from mmm_core.model.build import (
     BuiltModel,
-    _HILL_EPS,
     _fourier_features,
     changepoint_locations,
     changepoint_matrix,
 )
 from mmm_core.model.config import AdstockType, SaturationType, TrendType
 from mmm_core.transforms import (
+    HILL_EPS as _HILL_EPS,
     delayed_adstock,
     geometric_adstock,
     hill_saturation,

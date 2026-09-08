@@ -134,6 +134,50 @@ def time_series_cv(
     return CVResult(folds=folds, mean_r2=mean_r2, mean_mape=mean_mape)
 
 
+# --- 1b. holdout: the cheap, always-on generalisation test ------------------------
+
+def holdout_mape(
+    data: pd.DataFrame,
+    config: ModelConfig,
+    *,
+    horizon: int | None = None,
+    fit_fn=None,
+    predict_fn=None,
+    sample_kwargs: dict | None = None,
+) -> float:
+    """Fit on everything but the last ``horizon`` weeks, then score those weeks.
+
+    A single held-back window rather than full expanding-origin cross-validation: it costs
+    one extra fit instead of five to fifteen, which is what makes it affordable to run on
+    *every* model rather than as an opt-in extra nobody switches on. That matters more than
+    the extra precision — the pre-refactor system had cross-validation available and off by
+    default, so in practice no model was ever scored out of sample at all.
+
+    Returns the out-of-sample MAPE, or ``nan`` when the window is too short to hold
+    anything back honestly.
+    """
+    fit_fn = fit_fn or _default_fit_fn
+    predict_fn = predict_fn or _default_predict_fn
+    sample_kwargs = sample_kwargs or {}
+
+    n = len(data)
+    if horizon is None:
+        # A tenth of the window, between 4 and 13 weeks: long enough to be a real test,
+        # short enough that the training window keeps its seasonal coverage.
+        horizon = max(4, min(13, n // 10))
+    train_end = n - horizon
+    # The training window still has to be long enough to identify the model at all.
+    if train_end < max(2 * horizon, 26 + config.burn_in_weeks):
+        return float("nan")
+
+    handle = fit_fn(data.iloc[:train_end], config, **sample_kwargs)
+    pred = np.asarray(predict_fn(handle, data))
+    pred_mean = pred.mean(axis=1) if pred.ndim == 2 else pred
+    y_true = data[config.kpi].to_numpy(dtype=float)[train_end:]
+    _, mape = _score(y_true, pred_mean[train_end:])
+    return float(mape)
+
+
 # --- 2. placebo test -------------------------------------------------------------
 
 def add_placebo_channel(
@@ -154,8 +198,44 @@ def add_placebo_channel(
     spend = rng.uniform(0.0, 2.0 * max(ref, 1e-6), len(data))
     data2 = data.copy()
     data2[name] = spend
-    config2 = replace(config, channels=config.channels + (ChannelConfig(name, channel_type),))
+    # Give the placebo the same prior scale as an average real channel, so it competes on
+    # equal terms. A placebo held down by a tighter prior would pass the test by
+    # construction and prove nothing.
+    mean_beta = float(np.mean([c.priors.beta_sigma for c in config.channels]))
+    placebo_priors = replace(config.channels[0].priors, beta_sigma=mean_beta)
+    config2 = replace(
+        config,
+        channels=config.channels
+        + (ChannelConfig(name, channel_type, priors=placebo_priors),),
+    )
     return data2, config2
+
+
+def placebo_contribution_share(
+    data: pd.DataFrame,
+    config: ModelConfig,
+    *,
+    name: str = "placebo_random",
+    seed: int = 0,
+    sample_kwargs: dict | None = None,
+    fit_fn=None,
+) -> float:
+    """Fit with an extra channel of pure random spend and report what it was credited with.
+
+    The single most direct test of over-attribution there is: if invented pressure earns a
+    measurable share of the KPI, the model is assigning effect to coincidence, and none of
+    the real channels' numbers can be trusted either. Returns ``nan`` if the extra fit
+    could not be run.
+    """
+    from mmm_core.model.fit import fit_model
+
+    fit_fn = fit_fn or fit_model
+    data2, config2 = add_placebo_channel(data, config, name=name, seed=seed)
+    summary, _ = fit_fn(data2, config2, **(sample_kwargs or {}))
+    match = [c for c in summary.channels if c.name == name]
+    if not match:
+        return float("nan")
+    return float(match[0].contribution_share.p50)
 
 
 def judge_placebo(summary, placebo_name: str, *, share_threshold: float = 0.05) -> CheckResult:

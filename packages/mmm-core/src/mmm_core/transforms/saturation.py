@@ -19,7 +19,19 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["hill_saturation", "logistic_saturation", "saturation_half_point"]
+__all__ = ["HILL_EPS", "hill_saturation", "logistic_saturation", "saturation_half_point"]
+
+# Tiny pedestal the *model* adds to (adstocked) spend before the saturation curve, so that
+# the gradient of ``x ** slope`` at x = 0 is defined and NUTS does not stall. It lives here,
+# in one place, because four call sites have to agree on it exactly or the numpy
+# reconstruction of a fit silently stops matching the PyTensor graph it came from:
+# ``model.build`` (the sampled graph), ``model.predict`` (out-of-sample reconstruction),
+# ``optimize`` (response curves) and the tests that pin the two against each other.
+#
+# The pure functions below deliberately do NOT apply it: mathematically, zero spend gives
+# zero response, and that identity is worth keeping. Callers that must mirror the model add
+# ``HILL_EPS`` to their input explicitly.
+HILL_EPS = 1e-6
 
 
 def hill_saturation(
