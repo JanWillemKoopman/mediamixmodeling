@@ -5,7 +5,9 @@ import type { Config } from "tailwindcss";
 // oranje als secundair accent. Semantische tokens (bg / surface / border / fg / accent …)
 // zodat de hele app centraal bij te stellen blijft.
 const config: Config = {
-  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  // lib/ staat er ook in: de fotoconfiguratie (lib/site/photos.ts) bevat klassen als
+  // aspect-[4/5] en object-[50%_40%] die anders nooit gegenereerd worden.
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {

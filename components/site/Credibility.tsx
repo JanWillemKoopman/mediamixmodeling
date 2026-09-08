@@ -1,5 +1,6 @@
 import { CHANNELS, EXAMPLE_CASE, EXAMPLE_LABEL, METHOD_FACTS } from "@/lib/site/exampleData";
 import { nl } from "@/lib/site/format";
+import { Photo } from "./Photo";
 import { Reveal } from "./Reveal";
 
 const AXIS_MAX = 36;
@@ -106,7 +107,14 @@ export function Credibility() {
 
         {/* Voorbeeldcase */}
         <Reveal delay={80}>
-          <article className="mt-20 rounded-2xl border border-site-line bg-site-sand p-7 sm:mt-24 sm:p-12">
+          <article className="mt-20 overflow-hidden rounded-2xl border border-site-line bg-site-sand sm:mt-24">
+            <Photo
+              slot="case"
+              rounded={false}
+              showCaption={false}
+              sizes="(min-width: 1280px) 72rem, 100vw"
+            />
+            <div className="p-7 sm:p-12">
             <p className="text-xs uppercase tracking-[0.14em] text-site-text-faint">
               Voorbeeldcase — samengesteld uit een voorbeelddataset, geen klantresultaat
             </p>
@@ -152,6 +160,7 @@ export function Credibility() {
                 verzinnen ze niet. In een gesprek laten we een volledige analyse zien — inclusief de
                 plekken waar de uitkomst onzeker was.
               </p>
+            </div>
             </div>
           </article>
         </Reveal>

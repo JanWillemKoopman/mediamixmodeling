@@ -204,6 +204,47 @@ html.js .site-figure.is-in .site-links {
   border-color: #111a2b;
 }
 
+/* Fotografie: één grading voor alle opnames. De foto gaat naar grijs, de schaduwen krijgen
+   de inktkleur mee (multiply) en de lichten het zand van het canvas (screen). Daardoor lezen
+   losse foto's als één serie en blijven ze in hetzelfde palet als de grafieken. */
+.site-photo {
+  isolation: isolate;
+  background-color: #e7e3db;
+}
+.site-photo img {
+  filter: grayscale(1) contrast(1.06) brightness(0.98);
+}
+.site-photo::before,
+.site-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.site-photo::before {
+  z-index: 1;
+  background: rgba(241, 237, 230, 0.2);
+  mix-blend-mode: screen;
+}
+.site-photo::after {
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(17, 26, 43, 0.58) 0%, rgba(27, 39, 64, 0.44) 100%);
+  mix-blend-mode: multiply;
+}
+
+/* Het brede beeld boven de managementvraag loopt onderin over in het donkere vlak, zodat
+   foto en sectie één geheel vormen in plaats van twee losse blokken. */
+.site-photo--band::after {
+  mix-blend-mode: normal;
+  background: linear-gradient(
+    180deg,
+    rgba(17, 26, 43, 0.42) 0%,
+    rgba(17, 26, 43, 0.58) 45%,
+    rgba(17, 26, 43, 0.92) 88%,
+    #111a2b 100%
+  );
+}
+
 /* Toetsenbordfocus is overal zichtbaar, met genoeg contrast op zowel het lichte canvas als
    de donkere statement-secties. */
 #top a:focus-visible,

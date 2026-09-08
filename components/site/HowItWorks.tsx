@@ -1,4 +1,6 @@
 import { HOW_IT_WORKS } from "@/lib/site/copy";
+import { hasPhoto } from "@/lib/site/photos";
+import { Photo } from "./Photo";
 import { Reveal } from "./Reveal";
 
 /**
@@ -7,9 +9,18 @@ import { Reveal } from "./Reveal";
  * voor wie erom vraagt, geen hoofdroute.
  */
 export function HowItWorks() {
+  const withPhoto = hasPhoto("work");
+
   return (
     <section id="aanpak" className="site-anchor border-t border-site-line" aria-labelledby="aanpak-titel">
       <div className="mx-auto max-w-[80rem] px-5 py-24 sm:px-8 sm:py-32 lg:px-12">
+        <div
+          className={
+            withPhoto
+              ? "grid gap-12 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)] lg:items-start lg:gap-16"
+              : ""
+          }
+        >
         <Reveal>
           <h2
             id="aanpak-titel"
@@ -22,6 +33,13 @@ export function HowItWorks() {
             maar over keuzes.
           </p>
         </Reveal>
+
+          {withPhoto && (
+            <Reveal delay={80}>
+              <Photo slot="work" sizes="(min-width: 1024px) 42rem, 100vw" />
+            </Reveal>
+          )}
+        </div>
 
         <ol className="mt-14 space-y-px">
           {HOW_IT_WORKS.map((item, index) => (

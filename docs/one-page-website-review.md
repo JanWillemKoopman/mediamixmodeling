@@ -13,7 +13,7 @@ aanpassingen, met de motivatie erbij.
 | 1 | Positionering | **9** | De H1 gaat over een budgetbeslissing, niet over een tool. "Media Mix Modeling" valt pas in sectie 05, als methodische noot onder de figuur, en nergens in een kop of CTA. Geen woord over Bayesiaans, MCMC, adstock, AI of dashboards op de hoofdroute. |
 | 2 | Messaging | **9** | Elke sectie volgt meten → begrijpen → beslissen. Verbodenlijst (unlock, maximaliseer, AI-powered, next-generation…) komt nergens voor. Alle effectuitspraken zijn geformuleerd als schatting mét bandbreedte. |
 | 3 | UX | **8,5** | Eén doorlopend argument, vier ankers, één laag progressive disclosure (native `<details>`). Volledige toetsenbordbediening, skip-link als eerste focusbare element, logische tabvolgorde geverifieerd. |
-| 4 | Visual design | **8,5** | Editoriale serif + neutrale sans, twee fonts, veel wit, ritme van licht/zand/inkt. Twee omkaderde panelen op de hele pagina, geen icoongrid, geen feature cards, geen screenshot-hero. |
+| 4 | Visual design | **8,5** | Vier voorbereide fotoplekken met één gedeelde grading (zie hieronder). Editoriale serif + neutrale sans, twee fonts, veel wit, ritme van licht/zand/inkt. Twee omkaderde panelen op de hele pagina, geen icoongrid, geen feature cards, geen screenshot-hero. |
 | 5 | Conversie | **8** | Eén primaire actie op drie plekken, formulier met vier verplichte velden, "voor wie" vlak vóór het formulier, en een secundaire CTA die naar bewijs in de pagina zelf leidt in plaats van naar een belofte. |
 | 6 | Trust | **8** | Alleen verifieerbare uitspraken over de werkwijze, elke schatting met marge, en een expliciete regel dat we geen klantnamen of -cijfers verzinnen. Blijft op 8 tot er een echte case is; dat is de enige weg naar een 9+. |
 | 7 | Responsive | **9** | Mobile-first opgezet; geen horizontale overflow op 320, 390, 768, 1280 en 1600px (gemeten). Balklabels verdwijnen ordelijk op smalle schermen, percentages blijven. |
@@ -34,6 +34,24 @@ aanpassingen, met de motivatie erbij.
 | Balken waren volledig `aria-hidden` | Hero- en scenariobalken hadden geen tekstequivalent | `srSummary` op elke balk, plus de bestaande verborgen datatabel bij de hoofdfiguur |
 | Contrast: accenttekst 2,7:1, hulptekst op zand 4,0:1, labels op middentonen 3,5:1, kleine print op inkt 3,6:1 | Vier keer onder AA | Aparte leesbare accentkleur (`site.accent-text`), hulptekst donkerder (#636C7D), segmentlabels op volle dekking, kleine print van 40/45% naar 60% wit |
 | Verborgen datatabel duwde de pagina 518px breed | Horizontale scroll op mobiel | `sr-only` op een wrapper in plaats van op de `<table>` |
+
+## Fotografie
+
+De pagina heeft vier fotoplekken gekregen, ontworpen als serie in plaats van als losse
+beelden: de hero (waar je resultaat ontstaat), een breed beeld dat overloopt in het donkere
+vlak met de managementvraag (de kamer waar die vraag valt), een beeld bij de vier stappen
+(mens in de lus) en een beeld bovenin de voorbeeldcase (de werkelijkheid waarin die speelt).
+Alle vier krijgen automatisch dezelfde duotone-grading in de paginakleuren — inkt in de
+schaduwen, zand in de lichten — zodat opnames uit verschillende bronnen als één serie lezen
+en niet met de grafieken vechten. Elk beeld heeft een bijschrift dat het aan het argument van
+de sectie koppelt, en een alt-tekst.
+
+De beelden zelf zijn nog niet geleverd: in deze omgeving is geen enkele beeldbank bereikbaar
+(het netwerkbeleid blokkeert Unsplash, Pexels, Wikimedia en Openverse), en foto's verzinnen
+kan niet. De plekken activeren zodra de bestanden in `public/photos/` staan; tot die tijd
+rendert elke plek niets en houdt de sectie haar typografische opmaak, zodat de pagina op elk
+moment compleet is. De opnamebrief per plek — onderwerp, uitsnede, bestandsnaam, wat wel en
+niet, rechten — staat in `docs/one-page-website-fotografie.md`.
 
 ## Wat bewust niet is gedaan
 

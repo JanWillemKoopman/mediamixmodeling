@@ -1,4 +1,6 @@
 import { EXAMPLE_LABEL } from "@/lib/site/exampleData";
+import { hasPhoto } from "@/lib/site/photos";
+import { Photo } from "./Photo";
 import { SITE } from "@/lib/site/copy";
 import { BudgetBar } from "./BudgetBar";
 import { Reveal } from "./Reveal";
@@ -11,10 +13,18 @@ import { shareSentence, spendSegments } from "./segments";
  */
 export function Hero() {
   const spend = spendSegments();
+  const withPhoto = hasPhoto("hero");
 
   return (
     <section className="mx-auto max-w-[80rem] px-5 pb-20 pt-16 sm:px-8 sm:pb-28 sm:pt-24 lg:px-12">
-      <div className="max-w-4xl">
+      <div
+        className={
+          withPhoto
+            ? "grid items-end gap-12 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-16 xl:grid-cols-[minmax(0,1fr)_22rem]"
+            : ""
+        }
+      >
+        <div className="max-w-4xl">
         <h1 className="font-display text-[clamp(2.75rem,8vw,5.5rem)] leading-[1.02] tracking-tight text-site-text">
           Weet wat je mediabudget doet.
         </h1>
@@ -37,6 +47,15 @@ export function Hero() {
             {SITE.ctaSecondary}
           </a>
         </div>
+        </div>
+
+        {withPhoto && (
+          <Photo
+            slot="hero"
+            priority
+            sizes="(min-width: 1280px) 22rem, (min-width: 1024px) 18rem, 100vw"
+          />
+        )}
       </div>
 
       <figure className="mt-16 sm:mt-24">

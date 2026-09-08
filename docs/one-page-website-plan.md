@@ -337,6 +337,10 @@ een uniforme kolom scrollt:
 2. **donker statement** (diep inktvlak, gecentreerd, zeer groot type) — 03, en het slotvlak 10;
 3. **data-vlak** (licht, maar met de balkvisualisatie als hoofdelement) — 01, 04, 05, 07, 09.
 
+**Fotografie** (toegevoegd na de eerste oplevering): vier plekken, elk met een rol in het
+argument, in één gedeelde duotone-grading zodat ze als serie lezen in plaats van als losse
+stockbeelden. Opnamebrief en werking: `docs/one-page-website-fotografie.md`.
+
 **Wat we bewust níét doen:** hero met screenshot, drie feature cards, logostrip, icoongrid,
 pricing, FAQ-accordeon, standaard CTA-banner, glasmorphism, gradient-blobs, "AI-glow",
 dashboard-mock als held.

@@ -9,6 +9,7 @@ import { Hero } from "@/components/site/Hero";
 import { HowItWorks } from "@/components/site/HowItWorks";
 import { Insight } from "@/components/site/Insight";
 import { ManagementQuestion } from "@/components/site/ManagementQuestion";
+import { PhotoBand } from "@/components/site/Photo";
 import { ProblemNoise } from "@/components/site/ProblemNoise";
 import { QuestionList } from "@/components/site/QuestionList";
 import { ReportingGap } from "@/components/site/ReportingGap";
@@ -73,6 +74,7 @@ export default async function Home() {
       <main id="main">
         <Hero />
         <ProblemNoise />
+        <PhotoBand slot="question" />
         <ManagementQuestion />
         <ReportingGap />
         <Insight />
