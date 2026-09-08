@@ -53,23 +53,3 @@ export function Photo({
   );
 }
 
-/**
- * Breed beeld dat in het donkere vlak eronder overloopt: onderaan verdwijnt de foto in de
- * inktkleur, zodat de foto en de sectie één geheel worden in plaats van twee blokken.
- */
-export function PhotoBand({ slot }: { slot: PhotoSlot }) {
-  if (!hasPhoto(slot)) return null;
-  const photo = PHOTOS[slot];
-
-  return (
-    <div className={`site-photo site-photo--band relative w-full ${photo.ratio}`}>
-      <Image
-        src={photo.src}
-        alt={photo.alt}
-        fill
-        sizes="100vw"
-        className={`object-cover ${photo.position ?? ""}`}
-      />
-    </div>
-  );
-}

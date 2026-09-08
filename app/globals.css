@@ -204,6 +204,23 @@ html.js .site-figure.is-in .site-links {
   border-color: #111a2b;
 }
 
+/* Fijne korrel over de donkere vlakken: geeft de inkt diepte en houdt grote egale vlakken
+   levend, zonder dat er iets te "zien" is. Puur textuur, dus voor schermlezers onzichtbaar. */
+.site-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+}
+.site-grain > * {
+  position: relative;
+  z-index: 1;
+}
+
 /* Fotografie: één grading voor alle opnames. De foto gaat naar grijs, de schaduwen krijgen
    de inktkleur mee (multiply) en de lichten het zand van het canvas (screen). Daardoor lezen
    losse foto's als één serie en blijven ze in hetzelfde palet als de grafieken. */

@@ -24,7 +24,7 @@ export function ManagementQuestion() {
       : `Bij een verschuiving van ${shift}% van het budget van ${SCENARIO.fromLabel} naar ${SCENARIO.toLabel} ligt het geschatte effect op de omzet tussen ${signedPct(low)} en ${signedPct(high)}.`;
 
   return (
-    <section id="de-vraag" className="site-anchor bg-site-ink text-site-on-ink" aria-labelledby="vraag-titel">
+    <section id="de-vraag" className="site-anchor site-grain relative bg-site-ink text-site-on-ink" aria-labelledby="vraag-titel">
       <div className="mx-auto max-w-[80rem] px-5 py-28 sm:px-8 sm:py-40 lg:px-12">
         <h2
           id="vraag-titel"

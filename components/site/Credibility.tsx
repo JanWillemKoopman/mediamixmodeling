@@ -1,6 +1,12 @@
-import { CHANNELS, EXAMPLE_CASE, EXAMPLE_LABEL, METHOD_FACTS } from "@/lib/site/exampleData";
+import {
+  CHANNELS,
+  EXAMPLE_CASE,
+  EXAMPLE_LABEL,
+  MEASUREMENT_WINDOW,
+  METHOD_FACTS,
+} from "@/lib/site/exampleData";
 import { nl } from "@/lib/site/format";
-import { Photo } from "./Photo";
+import { WeekField } from "./WeekField";
 import { Reveal } from "./Reveal";
 
 const AXIS_MAX = 36;
@@ -108,12 +114,7 @@ export function Credibility() {
         {/* Voorbeeldcase */}
         <Reveal delay={80}>
           <article className="mt-20 overflow-hidden rounded-2xl border border-site-line bg-site-sand sm:mt-24">
-            <Photo
-              slot="case"
-              rounded={false}
-              showCaption={false}
-              sizes="(min-width: 1280px) 72rem, 100vw"
-            />
+            <WeekField variant="strip" highlightLast={MEASUREMENT_WINDOW} />
             <div className="p-7 sm:p-12">
             <p className="text-xs uppercase tracking-[0.14em] text-site-text-faint">
               Voorbeeldcase — samengesteld uit een voorbeelddataset, geen klantresultaat

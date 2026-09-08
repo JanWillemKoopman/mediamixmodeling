@@ -51,7 +51,7 @@ export function DemoRequest() {
   }
 
   return (
-    <section id="demo" className="site-anchor bg-site-ink text-site-on-ink" aria-labelledby="demo-titel">
+    <section id="demo" className="site-anchor site-grain relative bg-site-ink text-site-on-ink" aria-labelledby="demo-titel">
       <div className="mx-auto max-w-[80rem] px-5 py-24 sm:px-8 sm:py-32 lg:px-12">
         <div className="grid gap-14 lg:grid-cols-2 lg:gap-20">
           <div>

@@ -4,17 +4,18 @@ import path from "path";
 /**
  * Fotografie op de one-page.
  *
- * Vier plekken, geen enkele decoratief: elke foto draagt een stap uit het argument
- * (waar je resultaat ontstaat → wie de vraag stelt → hoe het werk gebeurt → in welke
- * werkelijkheid de case speelt). Alle foto's krijgen dezelfde duotone-grading in de
- * paginakleuren (zie .site-photo in globals.css), zodat losse opnames als één serie lezen.
+ * Twee optionele plekken. Het beeldmateriaal van de pagina is de data zelf (zie
+ * components/site/WeekField.tsx); fotografie is een aanvulling, geen voorwaarde. Waar ze
+ * staat draagt ze een stap uit het argument: waar je resultaat ontstaat (hero) en dat een
+ * mens elke stap beoordeelt (aanpak). Beide krijgen dezelfde duotone-grading in de
+ * paginakleuren (zie .site-photo in globals.css), zodat ze als één serie lezen.
  *
  * De bestanden staan in `public/photos/`. Zolang een bestand ontbreekt rendert de plek
  * niets en valt de sectie terug op haar typografische opmaak — de pagina is dus altijd
  * compleet, ook halverwege een fotoshoot. Zie docs/one-page-website-fotografie.md voor de
  * opnamebrief per plek.
  */
-export type PhotoSlot = "hero" | "question" | "work" | "case";
+export type PhotoSlot = "hero" | "work";
 
 export interface PhotoSpec {
   /** Pad onder /public. */
@@ -38,26 +39,11 @@ export const PHOTOS: Record<PhotoSlot, PhotoSpec> = {
     ratio: "aspect-[3/2] lg:aspect-[4/5]",
     position: "object-[50%_40%]",
   },
-  question: {
-    src: "/photos/directie-overleg.jpg",
-    alt: "Enkele mensen in een vergaderruimte in gesprek over een plan.",
-    ratio: "aspect-[16/9] sm:aspect-[21/9]",
-    position: "object-[50%_45%]",
-  },
   work: {
     src: "/photos/analyse-samen.jpg",
     alt: "Twee collega's bekijken samen cijfers op papier en scherm.",
     caption: "Elke stap wordt door een mens beoordeeld voordat er iets wordt opgeleverd.",
     ratio: "aspect-[3/2]",
-    position: "object-[50%_50%]",
-  },
-  case: {
-    src: "/photos/winkel-schap.jpg",
-    alt: "Een klant kiest een product uit het schap in een winkel.",
-    // Geen bijschrift: deze foto staat bovenin de casekaart, waar het label eronder
-    // ("Voorbeeldcase — …") het bijschrift al is.
-    // Brede uitsnede: de foto opent de kaart, hij mag hem niet overheersen.
-    ratio: "aspect-[3/2] sm:aspect-[16/7]",
     position: "object-[50%_50%]",
   },
 };
