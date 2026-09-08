@@ -16,3 +16,15 @@ export function signedPct(value: number, decimals = 1): string {
   const prefix = rounded > 0 ? "+" : "";
   return `${prefix}${nl(rounded, decimals)}%`;
 }
+
+/** 7500000 → "€ 7,5 mln" — korte, leesbare bedragen voor productlabels. */
+export function euroShort(value: number): string {
+  if (Math.abs(value) >= 1_000_000) return `€ ${nl(value / 1_000_000, 1)} mln`;
+  if (Math.abs(value) >= 1_000) return `€ ${nl(value / 1_000)}k`;
+  return `€ ${nl(value)}`;
+}
+
+/** 26.4 → "26,4%" */
+export function pct(value: number, decimals = 0): string {
+  return `${nl(value, decimals)}%`;
+}

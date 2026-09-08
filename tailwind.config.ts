@@ -1,6 +1,9 @@
 import type { Config } from "tailwindcss";
 
-// Udenhout.nl-huisstijl: wit/lichtbeige canvas, zand/beige neutralen voor kaarten en
+// Twee tokensets in één config. `site.*` (+ de site-radii/-schaduwen) hoort bij de
+// publieke marketingsite: bijna-wit canvas, diep navy vlakken, één helderblauw accent.
+// Alles daarna is de applicatie (wizard, dashboard) in de Udenhout.nl-huisstijl:
+// wit/lichtbeige canvas, zand/beige neutralen voor kaarten en
 // tabelkoppen, donkerblauw als inkt- en merkkleur, helderblauw als primaire actiekleur en
 // oranje als secundair accent. Semantische tokens (bg / surface / border / fg / accent …)
 // zodat de hele app centraal bij te stellen blijft.
@@ -9,30 +12,36 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // ── Marketingpagina (app/page.tsx + components/site/) ────────────────────────
-        // Eigen, additieve tokenset voor de publieke one-page. Staat bewust náást de
-        // app-tokens hieronder: de wizard en het klantdashboard veranderen hier niet van,
-        // en de marketingpagina erft omgekeerd niet de applicatie-esthetiek.
-        // Kleurregel van de pagina: bestedingen zijn neutraal, effect is blauw.
+        // ── Marketingsite (app/page.tsx + components/site/) ─────────────────────────
+        // Eigen, additieve tokenset voor de publieke site. Staat bewust náást de
+        // app-tokens hieronder: wizard en klantdashboard veranderen hier niet van, en de
+        // site erft omgekeerd niet de applicatie-esthetiek.
+        // Kleurregel: bestedingen zijn neutraal-grijs, effect is blauw. Verder niets.
         site: {
-          ink: "#111A2B", // diep statementvlak
-          "ink-2": "#1B2740", // verhoogd vlak op inkt
-          canvas: "#FBFAF7", // warm off-white
-          sand: "#F1EDE6", // afwisselingsvlak
-          text: "#141C2F",
-          "text-muted": "#4A5468",
-          "text-faint": "#636C7D",
-          "on-ink": "#F4F2EE",
-          "on-ink-muted": "#AEB9CC",
-          line: "rgba(20,28,47,0.12)",
-          "line-strong": "rgba(20,28,47,0.26)",
-          "line-ink": "rgba(255,255,255,0.16)",
-          effect: "#0F5099", // signaalkleur: media-effect én primaire actie
-          "effect-hover": "#0A3D77",
-          "effect-soft": "#E9F1FB",
-          "effect-ink": "#8FB8F2", // dezelfde signaalkleur, leesbaar op inkt
-          accent: "#ED6935", // spaarzaam: markeert de kloof tussen budget en effect
-          "accent-text": "#B54A1A", // dezelfde signaalkleur, maar leesbaar als tekst (AA)
+          canvas: "#FAFBFC", // bijna-wit paginavlak
+          surface: "#FFFFFF", // kaart
+          "surface-2": "#F3F5F8", // subtiel getint vlak
+          "surface-3": "#E9EDF3", // ingedrukt/actief vlak
+          ink: "#080C16", // diep bijna-zwart navy
+          "ink-2": "#0F1526", // verhoogd paneel op inkt
+          "ink-3": "#182034", // tweede niveau op inkt
+          text: "#0B1020",
+          "text-muted": "#525C74",
+          "text-faint": "#7A8499",
+          "on-ink": "#EDF1F7",
+          "on-ink-muted": "#97A2B8",
+          "on-ink-faint": "#6A768E",
+          line: "rgba(11,16,32,0.09)",
+          "line-strong": "rgba(11,16,32,0.16)",
+          "line-ink": "rgba(255,255,255,0.10)",
+          "line-ink-strong": "rgba(255,255,255,0.20)",
+          // Eén heldere blauwe signaalkleur: media-effect én primaire actie.
+          blue: "#1F5AFF",
+          "blue-hover": "#1544D2",
+          "blue-soft": "#ECF1FF",
+          "blue-mute": "#5B87F5",
+          "blue-ink": "#7FA6FF", // dezelfde signaalkleur, leesbaar op inkt
+          "blue-ink-soft": "rgba(127,166,255,0.14)",
         },
         // Wit canvas — Udenhout.nl-secties wisselen wit af met lichtbeige vlakken.
         bg: "#FFFFFF",
@@ -91,9 +100,9 @@ const config: Config = {
         },
       },
       fontFamily: {
-        // Display-serif van de marketingpagina (self-hosted via next/font, zie layout.tsx).
-        // Alleen gebruikt op grote koppen; body blijft de humanistische sans hieronder.
-        display: ["var(--font-display)", "ui-serif", "Georgia", "serif"],
+        // Display-grotesk van de marketingsite (self-hosted via next/font, zie layout.tsx):
+        // dezelfde familie als de body, maar krapper — moderne SaaS-koppen, geen serif.
+        display: ["var(--font-display)", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         // TheSansB (W5 Plain body / W7 koppen) is de huisstijlfont van udenhout.nl. Die is
         // niet publiek als webfont beschikbaar, dus alleen de naam staat vooraan de stack —
         // wordt hij lokaal geïnstalleerd, pakt de browser 'm automatisch op. Figtree
@@ -105,6 +114,10 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
       },
       borderRadius: {
+        // Marketingsite: strakke, compacte radii (knoppen 10px, kaarten 14px, panelen 20px).
+        ctl: "10px",
+        card: "14px",
+        panel: "20px",
         // Udenhout.nl: duidelijk afgeronde kaarten en tabelkoppen (1rem), pil-knoppen
         // blijven volledig rond (rounded-full, hieronder ongemoeid).
         sm: "0.25rem",
@@ -126,6 +139,12 @@ const config: Config = {
         soft: "0 3px 6px 0 rgb(25 36 59 / 0.08)",
         glow: "0 0 0 3px rgba(0,61,165,0.35)",
         "glow-sm": "0 0 0 3px rgba(0,61,165,0.30)",
+        // Marketingsite: terughoudende schaduwen — kaarten liggen bijna plat, alleen het
+        // productpaneel mag echt van de pagina afkomen.
+        "site-card": "0 1px 2px rgba(11,16,32,0.04), 0 10px 30px -18px rgba(11,16,32,0.20)",
+        "site-lift": "0 2px 4px rgba(11,16,32,0.05), 0 18px 40px -20px rgba(11,16,32,0.26)",
+        "site-panel": "0 1px 1px rgba(11,16,32,0.04), 0 40px 80px -40px rgba(11,16,32,0.38)",
+        "site-ink": "0 40px 90px -50px rgba(0,0,0,0.9)",
       },
     },
   },

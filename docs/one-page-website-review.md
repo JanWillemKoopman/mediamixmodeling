@@ -1,5 +1,7 @@
 # Fase 3 — kritische review van de nieuwe one-page
 
+> **Verouderd (historisch document).** Deze review hoort bij de vorige versie van de site.
+
 Review na implementatie, met opzet hard: gezocht naar generieke SaaS-patronen, zwakke copy,
 onduidelijke messaging, visuele rommeligheid, te veel cards, te veel techniek, zwakke CTA,
 slechte mobiele ervaring, overmatige animatie en gebrek aan onderscheidend vermogen.

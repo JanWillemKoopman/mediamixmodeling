@@ -1,5 +1,9 @@
 # Plan — nieuwe one-page website
 
+> **Verouderd (historisch document).** De site is daarna volledig opnieuw ontworpen en
+> herbouwd; de positionering en claimregels hieronder gelden nog steeds, de beschreven
+> vormgeving en sectie-indeling niet meer. Actueel: `docs/website-design-system.md`.
+
 > **Status:** Fase 1 (plan). Nog geen code geschreven, geen componenten gebouwd, de bestaande
 > one-page (`app/page.tsx`) is ongewijzigd. Dit document is de bron voor Fase 2.
 >

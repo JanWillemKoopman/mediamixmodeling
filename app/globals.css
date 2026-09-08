@@ -4,22 +4,20 @@
 
 :root {
   color-scheme: light;
-  /* --font-sans wordt via next/font op <html> gezet (zie layout.tsx). Alleen de
-     mono-stack blijft een systeem-stack: gebruikt voor kleine technische labels. */
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono",
-    monospace;
+  /* --font-sans, --font-display en --font-mono worden via next/font op <html> gezet
+     (zie layout.tsx). */
 }
 
 body {
   @apply bg-bg text-fg antialiased;
 }
 
-/* Strakke, moderne koppen: iets krappere tracking, in dezelfde heldere sans. */
+/* Strakke, moderne koppen: krappere tracking, in dezelfde heldere grotesk. */
 @layer base {
   h1,
   h2,
   h3 {
-    letter-spacing: -0.015em;
+    letter-spacing: -0.02em;
   }
 }
 
@@ -90,14 +88,36 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Publieke one-page (app/page.tsx + components/site/)
+   Publieke marketingsite (app/page.tsx + components/site/)
 
-   Alles hieronder is gescopet op .site-* en raakt de applicatie niet. Uitgangspunt:
-   de volledige inhoud is standaard zichtbaar en in de eindstand. Pas wanneer er
-   JavaScript is (html.js, gezet vóór de eerste paint in layout.tsx) starten
-   onthullingen en de balkanimatie in hun beginstand — zonder JS mist de bezoeker
-   dus animatie, geen informatie.
+   Alles hieronder is gescopet op #site en de .site-klassen; de applicatie raakt het niet.
+   Uitgangspunt: de volledige inhoud is standaard zichtbaar en in de eindstand.
+   Pas wanneer er JavaScript is (html.js, gezet vóór de eerste paint in layout.tsx)
+   starten onthullingen en animaties in hun beginstand — zonder JS mist de bezoeker
+   dus beweging, geen informatie.
    ───────────────────────────────────────────────────────────────────────────── */
+
+#site {
+  /* Designtokens die ook buiten Tailwind bereikbaar moeten zijn: SVG-fills, inline
+     styles en de databalken. Zelfde waarden als de `site.*`-tokens in tailwind.config.ts. */
+  --canvas: #fafbfc;
+  --surface: #ffffff;
+  --surface-2: #f3f5f8;
+  --ink: #080c16;
+  --ink-2: #0f1526;
+  --text: #0b1020;
+  --text-muted: #525c74;
+  --line: rgba(11, 16, 32, 0.09);
+  --line-ink: rgba(255, 255, 255, 0.1);
+  --blue: #1f5aff;
+  --blue-ink: #7fa6ff;
+
+  /* Bewegingsritme van de hele site: één curve, drie snelheden. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 220ms;
+  --base: 480ms;
+  --slow: 900ms;
+}
 
 html {
   scroll-behavior: smooth;
@@ -110,118 +130,234 @@ html {
 /* Gestaffelde onthulling bij in beeld komen. --d = extra vertraging per element. */
 html.js .site-reveal {
   opacity: 0;
-  transform: translateY(14px);
+  transform: translateY(16px);
 }
 html.js .site-reveal.is-in {
   opacity: 1;
   transform: none;
   transition:
-    opacity 600ms cubic-bezier(0.22, 1, 0.36, 1) var(--d, 0ms),
-    transform 600ms cubic-bezier(0.22, 1, 0.36, 1) var(--d, 0ms);
+    opacity 620ms var(--ease) var(--d, 0ms),
+    transform 620ms var(--ease) var(--d, 0ms);
 }
 
-/* De twee balken: het effect-segment staat in rust op de breedte van het budget-segment
-   (--w0) en beweegt naar zijn eigen breedte (--w) zodra de figuur in beeld komt. Dat
-   verschil ís het argument van de pagina. */
-.site-seg {
+/* Gestaffelde onthulling binnen één figuur: de kinderen wachten op de figuur zelf. */
+html.js .site-anim .site-stagger {
+  opacity: 0;
+  transform: translateY(10px);
+}
+html.js .site-anim.is-in .site-stagger {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 520ms var(--ease) var(--d, 0ms),
+    transform 520ms var(--ease) var(--d, 0ms);
+}
+
+/* Databalken: elke balk animeert van --w0 (beginstand) naar --w (eindstand) zodra de
+   figuur in beeld is. Het verschil tussen die twee ís steeds het argument. */
+.site-bar {
+  width: var(--w);
+  transition: width var(--slow) var(--ease) var(--d, 0ms);
+}
+html.js .site-anim .site-bar {
+  width: var(--w0, 0%);
+}
+html.js .site-anim.is-in .site-bar {
   width: var(--w);
 }
-html.js .site-figure .site-seg--effect {
-  width: var(--w0);
-  transition: width 900ms cubic-bezier(0.22, 1, 0.36, 1);
+.site-bar-v {
+  height: var(--h);
+  transition: height var(--slow) var(--ease) var(--d, 0ms);
 }
-html.js .site-figure.is-in .site-seg--effect {
-  width: var(--w);
+html.js .site-anim .site-bar-v {
+  height: var(--h0, 0%);
 }
-html.js .site-figure .site-links {
+html.js .site-anim.is-in .site-bar-v {
+  height: var(--h);
+}
+
+/* Balken die op waarde-verandering meebewegen (scenario-schuif): korter en directer,
+   want hier stuurt de bezoeker zelf. */
+.site-bar-live {
+  transition: width 420ms var(--ease);
+}
+
+/* Lijnen die zichzelf tekenen. --len wordt door de component gezet op de padlengte. */
+.site-draw {
+  stroke-dasharray: var(--len);
+  stroke-dashoffset: 0;
+}
+html.js .site-anim .site-draw {
+  stroke-dashoffset: var(--len);
+}
+html.js .site-anim.is-in .site-draw {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1200ms var(--ease) var(--d, 0ms);
+}
+
+/* Vlakken (onzekerheidsband, gearceerde gebieden) faden na de lijn in. */
+html.js .site-anim .site-fade {
   opacity: 0;
 }
-html.js .site-figure.is-in .site-links {
+html.js .site-anim.is-in .site-fade {
   opacity: 1;
-  transition: opacity 500ms ease 550ms;
+  transition: opacity 700ms var(--ease) var(--d, 300ms);
 }
 
-/* Schuifregelaar: één bediening, groot genoeg voor een vinger, met een duidelijke
-   focusring voor toetsenbordgebruik. */
+/* Subtiel technisch raster achter productpanelen — geeft de panelen een "canvas"
+   in plaats van een lege vlakte. */
+.site-grid-light {
+  background-image:
+    linear-gradient(to right, rgba(11, 16, 32, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(11, 16, 32, 0.045) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.site-grid-ink {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+/* Rand van het raster vervagen, zodat het nooit als kader gaat werken. */
+.site-grid-mask {
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 45%, transparent 100%);
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 45%, transparent 100%);
+}
+
+/* Zachte blauwe gloed onder het hero-paneel: één keer op de pagina, geen gradient-blobs. */
+.site-glow::before {
+  content: "";
+  position: absolute;
+  inset: -12% -6% auto -6%;
+  height: 70%;
+  background: radial-gradient(60% 100% at 50% 0%, rgba(31, 90, 255, 0.13), transparent 70%);
+  pointer-events: none;
+}
+
+/* Statuslampje in productpanelen: rustig ademend, nooit knipperend. */
+@keyframes site-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+.site-pulse {
+  animation: site-pulse 2600ms var(--ease) infinite;
+}
+
+/* Schuifregelaar: één bediening, groot genoeg voor een vinger, met duidelijke focusring. */
 .site-range {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 44px;
+  height: 40px;
   background: transparent;
   cursor: pointer;
 }
 .site-range::-webkit-slider-runnable-track {
-  height: 4px;
+  height: 3px;
   border-radius: 9999px;
-  background: rgba(20, 28, 47, 0.16);
+  background: rgba(11, 16, 32, 0.14);
 }
 .site-range::-moz-range-track {
-  height: 4px;
+  height: 3px;
   border-radius: 9999px;
-  background: rgba(20, 28, 47, 0.16);
+  background: rgba(11, 16, 32, 0.14);
 }
 .site-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  height: 26px;
-  width: 26px;
-  margin-top: -11px;
+  height: 24px;
+  width: 24px;
+  margin-top: -10.5px;
   border-radius: 9999px;
-  background: #0f5099;
-  border: 3px solid #fbfaf7;
-  box-shadow: 0 1px 4px rgba(20, 28, 47, 0.3);
+  background: #1f5aff;
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(11, 16, 32, 0.28);
+  transition: transform var(--fast) var(--ease);
 }
 .site-range::-moz-range-thumb {
-  height: 26px;
-  width: 26px;
+  height: 24px;
+  width: 24px;
   border-radius: 9999px;
-  background: #0f5099;
-  border: 3px solid #fbfaf7;
-  box-shadow: 0 1px 4px rgba(20, 28, 47, 0.3);
+  background: #1f5aff;
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(11, 16, 32, 0.28);
+}
+.site-range:hover::-webkit-slider-thumb {
+  transform: scale(1.08);
 }
 .site-range:focus-visible {
   outline: none;
 }
 .site-range:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 4px rgba(15, 80, 153, 0.35);
+  box-shadow: 0 0 0 4px rgba(31, 90, 255, 0.32);
 }
 .site-range:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 4px rgba(15, 80, 153, 0.35);
+  box-shadow: 0 0 0 4px rgba(31, 90, 255, 0.32);
 }
 
-/* Op de donkere statement-sectie staat dezelfde regelaar op inkt. */
-.site-range--ink::-webkit-slider-runnable-track,
+/* Dezelfde regelaar op de donkere secties. */
+.site-range--ink::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.16);
+}
 .site-range--ink::-moz-range-track {
-  background: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.16);
 }
 .site-range--ink::-webkit-slider-thumb {
-  background: #8fb8f2;
-  border-color: #111a2b;
+  background: #7fa6ff;
+  border-color: #0f1526;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
 }
 .site-range--ink::-moz-range-thumb {
-  background: #8fb8f2;
-  border-color: #111a2b;
+  background: #7fa6ff;
+  border-color: #0f1526;
+}
+.site-range--ink:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(127, 166, 255, 0.34);
+}
+.site-range--ink:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px rgba(127, 166, 255, 0.34);
 }
 
-/* Toetsenbordfocus is overal zichtbaar, met genoeg contrast op zowel het lichte canvas als
-   de donkere statement-secties. */
-#top a:focus-visible,
-#top button:focus-visible,
-#top summary:focus-visible,
-#top input:focus-visible,
-#top select:focus-visible,
-#top textarea:focus-visible {
-  outline: 2px solid #0f5099;
+/* Toetsenbordfocus is overal zichtbaar, met genoeg contrast op zowel het lichte canvas
+   als de donkere secties. */
+#site a:focus-visible,
+#site button:focus-visible,
+#site summary:focus-visible,
+#site input:focus-visible,
+#site select:focus-visible,
+#site textarea:focus-visible {
+  outline: 2px solid #1f5aff;
   outline-offset: 3px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
-#top .bg-site-ink a:focus-visible,
-#top .bg-site-ink button:focus-visible,
-#top .bg-site-ink input:focus-visible,
-#top .bg-site-ink select:focus-visible,
-#top .bg-site-ink textarea:focus-visible {
-  outline-color: #8fb8f2;
+#site .on-ink a:focus-visible,
+#site .on-ink button:focus-visible,
+#site .on-ink input:focus-visible,
+#site .on-ink select:focus-visible,
+#site .on-ink textarea:focus-visible {
+  outline-color: #7fa6ff;
+}
+
+/* Mobiel menu: schuift open vanuit de header in plaats van te verschijnen. */
+@keyframes site-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.site-sheet {
+  animation: site-sheet-in 240ms var(--ease) both;
 }
 
 /* Beweging is nooit de drager van betekenis: uit betekent direct de eindstand. */
@@ -229,17 +365,46 @@ html.js .site-figure.is-in .site-links {
   html {
     scroll-behavior: auto;
   }
-  html.js .site-reveal {
+  html.js .site-reveal,
+  html.js .site-reveal.is-in {
     opacity: 1;
     transform: none;
     transition: none;
   }
-  html.js .site-figure .site-seg--effect {
+  html.js .site-anim .site-bar,
+  html.js .site-anim.is-in .site-bar {
     width: var(--w);
     transition: none;
   }
-  html.js .site-figure .site-links {
+  html.js .site-anim .site-bar-v,
+  html.js .site-anim.is-in .site-bar-v {
+    height: var(--h);
+    transition: none;
+  }
+  html.js .site-anim .site-draw,
+  html.js .site-anim.is-in .site-draw {
+    stroke-dashoffset: 0;
+    transition: none;
+  }
+  html.js .site-anim .site-fade,
+  html.js .site-anim.is-in .site-fade {
     opacity: 1;
     transition: none;
+  }
+  html.js .site-anim .site-stagger,
+  html.js .site-anim.is-in .site-stagger {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .site-bar-live {
+    transition: none;
+  }
+  .site-pulse {
+    animation: none;
+    opacity: 1;
+  }
+  .site-sheet {
+    animation: none;
   }
 }

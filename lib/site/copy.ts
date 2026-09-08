@@ -1,80 +1,124 @@
-// Gestructureerde copy van de one-page op één plek, zodat de tekst te reviewen is zonder
-// door JSX te lezen. Lopende alinea's staan bij de sectie zelf; hier staat alles wat een
-// lijst, stap of vraag is. Toon: helder, concreet, zakelijk — verkoop de uitkomst, niet de
-// techniek (docs/one-page-website-plan.md §4).
+// Gestructureerde copy van de site op één plek, zodat de tekst te reviewen is zonder door
+// JSX te lezen. Lopende alinea's staan bij de sectie zelf; hier staat alles wat een lijst,
+// stap, navigatie-item of vraag is. Toon: helder, concreet, zakelijk — verkoop de uitkomst
+// (betere budgetbeslissingen), niet de methode.
 
 export const SITE = {
   wordmark: "media mix modeling",
   ctaPrimary: "Vraag een demo aan",
-  ctaSecondary: "Bekijk een voorbeeldanalyse",
+  ctaSecondary: "Bekijk hoe het werkt",
+  tagline: "Van mediabestedingen naar media-effect. Van media-effect naar betere budgetbeslissingen.",
 };
 
-/** De vijf managementvragen uit sectie 06. Elk antwoord eindigt bij een beslissing. */
-export const MANAGEMENT_QUESTIONS = [
-  {
-    question: "Welke mediakanalen dragen naar schatting bij aan ons resultaat?",
-    answer:
-      "Je ziet per kanaal de geschatte bijdrage aan je resultaat, met de bandbreedte eromheen. Daarmee weet je niet alleen welke kanalen ertoe lijken te doen, maar ook hoe zeker dat beeld is.",
-  },
-  {
-    question: "Waar zit ruimte om budget anders te verdelen?",
-    answer:
-      "Kanalen waar extra budget naar verwachting weinig toevoegt, en kanalen waar nog ruimte lijkt te zitten, worden naast elkaar zichtbaar. Dat is het startpunt van een verschuiving, geen automatisch besluit.",
-  },
-  {
-    question: "Wat kan er gebeuren als we onze budgetverdeling veranderen?",
-    answer:
-      "Je vergelijkt je huidige verdeling met een alternatieve verdeling en ziet het geschatte effect op je resultaat — als bereik, niet als belofte.",
-  },
-  {
-    question: "Hoe verhouden onze kanalen zich tot elkaar?",
-    answer:
-      "Kanalen worden op dezelfde manier en over dezelfde periode beoordeeld. Daardoor vergelijk je ze eindelijk op één maatstaf in plaats van op zeven verschillende rapportages.",
-  },
-  {
-    question: "Hoe onderbouw ik mijn mediaplan richting directie?",
-    answer:
-      "Je legt uit welke aannames onder het plan liggen, wat het geschatte effect is en hoe zeker dat is. Dat gesprek gaat over keuzes, niet over de betrouwbaarheid van dashboards.",
-  },
+/** Hoofdmenu. Kort gehouden: vier ankers, inloggen, één actie. */
+export const NAV = [
+  { href: "#de-vraag", label: "De vraag" },
+  { href: "#aanpak", label: "Aanpak" },
+  { href: "#voorbeeld", label: "Voorbeeld" },
+  { href: "#methode", label: "Methode" },
 ];
 
-/** De vijf stappen van sectie 07: van meten naar bijsturen. */
-export const DECISION_FLOW = [
-  { step: "Meten", question: "Wat hebben we geïnvesteerd?", body: "Bestedingen per kanaal, week voor week, naast je eigen resultaatcijfers." },
-  { step: "Begrijpen", question: "Wat lijkt het effect daarvan te zijn?", body: "De geschatte bijdrage van media, gescheiden van prijs, promoties en seizoen." },
-  { step: "Vergelijken", question: "Hoe verhouden kanalen en scenario's zich?", body: "Dezelfde maatstaf voor elk kanaal, en alternatieve verdelingen naast elkaar." },
-  { step: "Beslissen", question: "Waar zetten we budget in?", body: "Een keuze die je kunt uitleggen, inclusief wat je niet zeker weet." },
-  { step: "Bijsturen", question: "Wat betekent dit voor het volgende mediaplan?", body: "Een afgesproken meetperiode, zodat de volgende analyse je aanname toetst." },
-];
+/** Van rapportage naar inzicht — de twee kolommen van de verschuivingssectie. */
+export const SHIFT = {
+  old: {
+    label: "Campagnerapportage",
+    caption: "Elk kanaal beoordeelt zichzelf",
+    items: ["ROAS per platform", "CPA per campagne", "Clicks en conversies", "Bereik en impressies", "Zeven verschillende waarheden"],
+  },
+  next: {
+    label: "Geïntegreerd media-effect",
+    caption: "Alle kanalen op één maatstaf",
+    items: ["Geschatte bijdrage per kanaal", "Bandbreedte rond elke schatting", "Scenario's naast elkaar", "Eén beeld over alle weken", "Een besluit dat je kunt uitleggen"],
+  },
+};
 
-/** De vier stappen van sectie 08. */
-export const HOW_IT_WORKS = [
+/** De vier stappen van de methode: data → analyse → inzicht → beslissing. */
+export const METHOD_STEPS = [
   {
+    number: "01",
     title: "Data",
-    body: "Je mediabestedingen, je resultaten en de factoren die er verder toe doen: prijs, promoties, seizoen, marktomstandigheden. Wekelijks, over meerdere jaren.",
-    note: "Wat we van je nodig hebben, heb je meestal al.",
+    body: "Mediabestedingen, je eigen resultaatcijfers en de factoren die er verder toe doen: prijs, promoties, seizoen, marktomstandigheden. Wekelijks, over meerdere jaren.",
+    note: "Wat we nodig hebben, heb je meestal al.",
   },
   {
+    number: "02",
     title: "Analyse",
-    body: "De onderliggende relaties tussen bestedingen, resultaat en die andere factoren worden geanalyseerd — over alle weken en alle kanalen tegelijk.",
-    note: "Media Mix Modeling is de methode achter de analyse.",
+    body: "Het model schat de samenhang tussen bestedingen, resultaat en die andere factoren — over alle kanalen en alle weken tegelijk, inclusief na-ijleffecten.",
+    note: "Media Mix Modeling is de methode.",
   },
   {
+    number: "03",
     title: "Inzicht",
     body: "De geschatte bijdrage van elk kanaal wordt zichtbaar, met de bandbreedte eromheen. Inclusief wat de analyse níét kan aantonen.",
     note: "Geen enkel getal zonder marge.",
   },
   {
+    number: "04",
     title: "Beslissing",
-    body: "Je beoordeelt je budgetverdeling met dit inzicht ernaast en legt vast welke aanname je de komende periode toetst.",
+    body: "Je beoordeelt alternatieve budgetverdelingen met dit inzicht ernaast en legt vast welke aanname je de komende periode toetst.",
     note: "Hier begint de waarde.",
   },
 ];
 
-/** Voor wie dit relevant is — staat vlak voor de CTA. */
+/** Drie principes rond onzekerheid. Een vertrouwenskenmerk, geen zwakte. */
+export const TRUST_PRINCIPLES = [
+  {
+    number: "01",
+    title: "Meerdere jaren data",
+    body: "Media-effect is pas te scheiden van seizoen, prijs en promotie als je genoeg weken hebt gezien. Daarom werken we met jaren, niet met campagnes.",
+  },
+  {
+    number: "02",
+    title: "Altijd een bandbreedte",
+    body: "Elk resultaat komt met het bereik waarbinnen het waarschijnlijk ligt. Ook als dat bereik ongemakkelijk breed is.",
+  },
+  {
+    number: "03",
+    title: "Menselijke interpretatie",
+    body: "Data, aannames en uitkomsten worden per stap door een analist beoordeeld. Een model levert schattingen, geen besluiten.",
+  },
+];
+
+/** Wat een echte klantcase straks laat zien. Nu nog leeg: we verzinnen geen resultaten. */
+export const PROOF_SLOTS = [
+  { label: "Sector & profiel", body: "Het type bedrijf en de markt waarin het opereert." },
+  { label: "Mediabudget", body: "De orde van grootte van het jaarlijkse mediabudget." },
+  { label: "Kanalen & historie", body: "Hoeveel kanalen zijn meegenomen en over hoeveel weken." },
+  { label: "Belangrijkste inzicht", body: "Wat de analyse liet zien dat de rapportages niet lieten zien." },
+  { label: "Budgetbeslissing", body: "Welke verschuiving er is doorgevoerd, en op welke aanname." },
+  { label: "Wat er daarna gemeten is", body: "Het waargenomen resultaat in de afgesproken meetperiode." },
+];
+
+/** Voor wie dit relevant is — staat vlak voor het formulier. */
 export const FIT_CRITERIA = [
-  "Je bent verantwoordelijk voor een mediabudget dat over meerdere kanalen wordt verdeeld.",
-  "Je hebt ongeveer twee jaar aan wekelijkse cijfers over bestedingen en resultaat.",
-  "Je moet je mediaplan intern kunnen onderbouwen, niet alleen rapporteren.",
-  "Je hoeft zelf geen expert te zijn in analysemethoden — daar hebben wij ons voor.",
+  "Je bent verantwoordelijk voor een substantieel mediabudget.",
+  "Je werkt met meerdere mediakanalen naast elkaar.",
+  "Je hebt historische data over bestedingen en resultaat.",
+];
+
+/** Voettekst: drie kolommen plus de juridische regel. */
+export const FOOTER_NAV = [
+  {
+    title: "Product",
+    links: [
+      { href: "#aanpak", label: "Hoe het werkt" },
+      { href: "#voorbeeld", label: "Voorbeeldanalyse" },
+      { href: "/login", label: "Inloggen" },
+    ],
+  },
+  {
+    title: "Inzicht",
+    links: [
+      { href: "#de-vraag", label: "De vraag" },
+      { href: "#media-effect", label: "Media-effect" },
+      { href: "#beslissingen", label: "Budgetbeslissingen" },
+    ],
+  },
+  {
+    title: "Bedrijf",
+    links: [
+      { href: "#methode", label: "Methode" },
+      { href: "#demo", label: "Contact" },
+    ],
+  },
 ];

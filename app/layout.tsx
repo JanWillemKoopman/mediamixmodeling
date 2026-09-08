@@ -1,29 +1,37 @@
 import type { Metadata, Viewport } from "next";
-import { Figtree, Instrument_Serif } from "next/font/google";
+import { Inter, Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-// Strakke, moderne typografie in de geest van Starbucks' SoDo Sans: één heldere,
-// humanistische sans voor zowel koppen als broodtekst — geen serif, geen klinische
-// tech-font. Wordt bij de build self-hosted (geen runtime-CDN).
-const sans = Figtree({
+// Eén moderne grotesk draagt de hele site: Inter voor UI en broodtekst. Wordt bij de build
+// self-hosted (geen runtime-CDN).
+const sans = Inter({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400", "500", "600"],
   variable: "--font-sans",
   display: "swap",
 });
 
-// Display-serif voor de publieke one-page: één gewicht, latin-subset, self-hosted. Levert
-// het editoriale karakter dat de pagina onderscheidt van een standaard SaaS-landingspagina.
-const display = Instrument_Serif({
+// Display: dezelfde skelet-vorm, krapper getekend. Grote koppen krijgen daardoor een
+// eigen stem zonder dat de pagina naar een tijdschrift of rapport gaat ruiken.
+const display = Inter_Tight({
   subsets: ["latin"],
-  weight: "400",
+  weight: ["500", "600"],
   variable: "--font-display",
+  display: "swap",
+});
+
+// Mono voor de technische microlabels in de productpanelen (metrics, assen, statusregels).
+// Dat is wat een datavisualisatie laat lezen als software in plaats van als infographic.
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400"],
+  variable: "--font-mono",
   display: "swap",
 });
 
 export const metadata: Metadata = {
   title: "media mix modeling",
-  description: "Inzicht in het effect van je mediabudget.",
+  description: "Weet wat je mediabudget doet.",
 };
 
 // maximumScale voorkomt dat iOS Safari bij focus op een invoerveld automatisch inzoomt
@@ -38,7 +46,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="nl" className={`${sans.variable} ${display.variable}`}>
+    <html lang="nl" className={`${sans.variable} ${display.variable} ${mono.variable}`}>
       <head>
         {/* Zet de js-vlag vóór de eerste paint. Alle inhoud is standaard zichtbaar; alleen
             mét JavaScript starten onthullings- en balkanimaties in hun beginstand, zodat de
