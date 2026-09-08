@@ -1,27 +1,41 @@
-"""Orchestrate one fit job: download sources -> align -> fit -> persist.
+"""Run one model run end-to-end, through an explicit state machine.
 
-This is the whole point of the async worker: a fit can take minutes, so it runs here on
-Modal without any request-path time limit. The function is pure of Supabase/Modal — it
-talks only to the :mod:`mmm_worker.ports` interfaces — so it is unit-tested with fakes.
+Shape of the change from v1: there, ``run_job`` marked the job running, downloaded
+whatever ``storage_path`` the config named, fitted, and wrote the result. There was no
+claim, so a duplicate spawn ran the same fit twice; no prior gate, so a model could start
+from an assumption its own data could never produce; and the extra reliability checks were
+opt-in and switched on by nothing, so in practice no model was ever scored out of sample.
 
-The split the architecture asks for is enforced here: the small aggregated ``summary``
-JSON goes to Postgres (via ``save_model_run``); the heavy raw ``InferenceData`` is
-uploaded to Storage as a compressed ``.nc`` and only referenced by path.
+Here every step is a named state, every transition is a compare-and-set, and the evidence
+a model needs in order to be allowed to give budget advice — a held-back window and a
+placebo channel — is gathered as part of the run rather than left as an option.
+
+Pure of Supabase and Modal: it talks only to :mod:`mmm_worker.ports`, so the whole
+lifecycle is unit-tested with in-memory fakes and no cloud.
 """
 
 from __future__ import annotations
 
 import os
+import platform
 import tempfile
+import traceback
 
-from mmm_core import build_master_dataset, build_master_datasets_by_region
-
-from mmm_worker.jobspec import parse_hier_job_config, parse_job_config, source_transforms_map
-from mmm_worker.ports import JobStore, Storage
+from mmm_worker.jobspec import SpecError, parse_model_config, sanitize_sample
+from mmm_worker.ports import ErrorCode, RunState, RunStore, Storage, USER_MESSAGES
 from mmm_worker.tables import read_table
 
+# The extra fits that produce out-of-sample evidence run at a lighter budget than the main
+# fit: they answer "does this generalise" and "does invented spend earn credit", which are
+# yes/no questions, not questions whose answer needs a tight credible interval.
+EVIDENCE_SAMPLE = {"draws": 400, "tune": 400, "chains": 2}
 
-def _default_netcdf_bytes(idata) -> bytes:
+
+class RunCancelled(Exception):
+    """Raised when the user asked for the run to stop; not a failure."""
+
+
+def _netcdf_bytes(idata) -> bytes:
     """Serialize ArviZ InferenceData to netCDF bytes via a temp file."""
     fd, path = tempfile.mkstemp(suffix=".nc")
     os.close(fd)
@@ -33,240 +47,293 @@ def _default_netcdf_bytes(idata) -> bytes:
         os.unlink(path)
 
 
-def _run_extra_evaluations(data, model_config, summary, evaluation):
-    """Run the opt-in cross-validation/placebo checks and fold the result into the gate.
+def _package_versions() -> dict:
+    """Versions of everything that can change a number, recorded on the run.
 
-    Each is its own extra fit (or several, for CV folds), so this deliberately uses a
-    lighter sampling budget than the main fit — good enough to judge reliability, not a
-    second full result. Never lets an evaluation failure take down an otherwise-good main
-    fit: any exception here just means that particular check is skipped.
+    Without this a result is reproducible only by luck: a minor numpyro release can move a
+    posterior, and there would be no way to tell that is what happened.
     """
-    from mmm_core.evaluation import add_placebo_channel, judge_placebo, time_series_cv
-    from mmm_core.model.fit import fit_model, recompute_quality_gate
-
-    light_sample = {"draws": 500, "tune": 500, "chains": 2}
-    placebo_ok = None
-    cv_mape = None
-
-    if evaluation.cross_validation:
+    versions: dict[str, str] = {"python": platform.python_version()}
+    for name in ("mmm_core", "pymc", "numpyro", "arviz", "pytensor", "numpy", "pandas", "jax"):
         try:
-            n = len(data)
-            horizon = max(2, min(8, n // 10))
-            min_train = max(8, int(n * 0.6))
-            if min_train + horizon <= n:
-                cv_result = time_series_cv(
-                    data, model_config,
-                    min_train_weeks=min_train, horizon=horizon,
-                    sample_kwargs=light_sample,
-                )
-                cv_mape = cv_result.mean_mape
-            # else: too few weeks for even one honest out-of-sample fold — skip rather
-            # than force a degenerate split.
+            module = __import__(name)
+            versions[name] = getattr(module, "__version__", "unknown")
         except Exception:
-            pass
-
-    if evaluation.placebo:
-        try:
-            data2, config2 = add_placebo_channel(data, model_config)
-            placebo_summary, _ = fit_model(data2, config2, **light_sample)
-            placebo_ok = judge_placebo(placebo_summary, "placebo_random").ok
-        except Exception:
-            pass
-
-    if placebo_ok is None and cv_mape is None:
-        return summary
-    return recompute_quality_gate(summary, placebo_ok=placebo_ok, cv_mape=cv_mape)
+            continue
+    return versions
 
 
-def _quality_to_json(report) -> dict:
-    return {
-        "issues": [
-            {
-                "code": i.code,
-                "severity": i.severity.value,
-                "message": i.message,
-                "source": i.source,
-                "details": i.details,
-            }
-            for i in report
-        ]
-    }
+def _classify(exc: BaseException) -> str:
+    """Map an exception to a closed error code, so the user never sees a traceback."""
+    if isinstance(exc, RunCancelled):
+        return ErrorCode.CANCELLED
+    if isinstance(exc, SpecError):
+        return ErrorCode.CONFIG_INVALID
+    if isinstance(exc, MemoryError):
+        return ErrorCode.OOM
+    if isinstance(exc, TimeoutError):
+        return ErrorCode.TIMEOUT
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if any(k in text for k in ("storage", "download", "upload", "connection", "timed out")):
+        return ErrorCode.STORAGE_UNAVAILABLE
+    return ErrorCode.INTERNAL
 
 
-def run_job(
-    jobstore: JobStore,
+def _gather_evidence(data, config, *, seed: int, log) -> tuple[float | None, float | None]:
+    """Fit the model twice more, on questions the main fit cannot answer about itself.
+
+    A held-back window says whether the model generalises; a channel of invented spend says
+    whether it credits coincidence. Both were available in v1 and both defaulted to off, so
+    the quality gate never actually received either. They are the difference between
+    "converged" and "worth acting on", so they run every time.
+
+    A failure in either is reported as "not measured" (``None``) rather than swallowed:
+    without the evidence the run simply cannot reach ``usable_for_decisions``, which is the
+    honest consequence.
+    """
+    from mmm_core.evaluation import holdout_mape, placebo_contribution_share
+
+    holdout = None
+    placebo = None
+    try:
+        value = holdout_mape(data, config, sample_kwargs={**EVIDENCE_SAMPLE, "seed": seed})
+        holdout = None if value != value else float(value)  # NaN -> not measured
+    except Exception as exc:
+        log(f"holdout evaluation skipped: {type(exc).__name__}: {exc}")
+    try:
+        value = placebo_contribution_share(
+            data, config, sample_kwargs={**EVIDENCE_SAMPLE, "seed": seed}
+        )
+        placebo = None if value != value else float(value)
+    except Exception as exc:
+        log(f"placebo evaluation skipped: {type(exc).__name__}: {exc}")
+    return holdout, placebo
+
+
+def _check_prior_gate(data, config) -> None:
+    """Refuse to spend a fit on priors the data could never produce.
+
+    The cheapest possible check, and the one v1 computed and then ignored: it stored the
+    result on the job row for a language model to read as prose. Here it blocks.
+    """
+    from mmm_core.evaluation import prior_predictive_check
+
+    result = prior_predictive_check(data, config, draws=300)
+    if not result.admits_observed:
+        raise SpecError(
+            f"de aannames sluiten je eigen cijfers uit: ze impliceren een KPI tussen "
+            f"{result.prior_low:,.0f} en {result.prior_high:,.0f}, terwijl je data tussen "
+            f"{result.observed_low:,.0f} en {result.observed_high:,.0f} ligt"
+        )
+    if not result.not_absurdly_wide:
+        raise SpecError(
+            "de aannames zijn zo ruim dat het model vrijwel elke uitkomst plausibel vindt; "
+            "daarmee zegt het resultaat niets"
+        )
+
+
+def run_model_run(
+    runs: RunStore,
     storage: Storage,
-    job_id: str,
+    run_id: str,
     *,
+    worker_id: str = "worker",
     fit_fn=None,
-    evaluate_fn=None,
-    netcdf_bytes=_default_netcdf_bytes,
+    evidence_fn=_gather_evidence,
+    prior_gate_fn=_check_prior_gate,
+    netcdf_bytes=_netcdf_bytes,
     artifact_prefix: str = "runs",
 ) -> dict:
-    """Run one fit job end-to-end. Returns a small status dict; never raises for
-    handled failures (data-quality errors, fit errors) — the job row is marked failed
-    and the reason returned."""
+    """Run one model run. Never raises for a handled failure — the row carries the reason."""
     if fit_fn is None:
-        # Imported lazily so the heavy model stack is only required when actually fitting.
         from mmm_core.model.fit import fit_model as fit_fn  # type: ignore
-    if evaluate_fn is None:
-        # Same lazy-import reasoning as fit_fn: _run_extra_evaluations pulls in
-        # mmm_core.evaluation/fit_model, which need the heavy model stack to actually run
-        # (though not merely to import). Injectable so tests can stub it out.
-        evaluate_fn = _run_extra_evaluations
 
-    job = jobstore.get_job(job_id)
-    project_id = job["project_id"]
-    jobstore.mark_running(job_id)
+    if not runs.claim(run_id, worker_id):
+        # Somebody else already has it. Doing nothing here is the entire idempotency
+        # guarantee, so it must stay a plain early return with no writes.
+        return {"status": "skipped", "reason": "already_claimed"}
+
+    log_lines: list[str] = []
+
+    def log(message: str) -> None:
+        log_lines.append(message)
+
+    def guard_cancel() -> None:
+        if runs.is_cancel_requested(run_id):
+            raise RunCancelled()
+
+    run = runs.get_run(run_id)
+    project_id = run["project_id"]
 
     try:
-        spec = parse_job_config(job["config"])
-    except Exception as exc:  # malformed config is a permanent failure
-        jobstore.mark_failed(job_id, f"invalid job config: {exc}")
-        return {"status": "failed", "reason": "invalid_config", "error": str(exc)}
+        # --- VALIDATING: is the specification runnable at all? -------------------
+        configuration = runs.get_configuration(run["model_configuration_id"])
+        config = parse_model_config(configuration["resolved_spec"])
+        dataset = runs.get_dataset_version(run["dataset_version_id"])
+        if dataset.get("status") != "ready":
+            raise SpecError("de dataset is nog niet klaar of is mislukt")
+        if not dataset.get("master_path"):
+            raise SpecError("de dataset heeft geen samengevoegde tabel")
+        guard_cancel()
 
-    try:
-        jobstore.update_progress(job_id, "downloading")
-        frames = []
-        for ref in spec.sources:
-            raw = storage.download(ref.storage_path)
-            frames.append((ref.spec, read_table(ref.storage_path, raw)))
+        # --- PREPARING_DATA ------------------------------------------------------
+        runs.set_state(run_id, RunState.PREPARING_DATA)
+        raw = storage.download(dataset["master_path"])
+        data = read_table(dataset["master_path"], raw)
+        if data.index.name != "week_start":
+            date_col = "week_start" if "week_start" in data.columns else data.columns[0]
+            data = data.set_index(date_col)
+        import pandas as pd
 
-        jobstore.update_progress(job_id, "building_dataset")
-        build = build_master_dataset(
-            frames,
-            event_dummies=list(spec.event_dummies),
-            features=list(spec.features),
-            source_transforms=source_transforms_map(spec.sources),
+        data.index = pd.to_datetime(data.index)
+        data = data.sort_index()
+        guard_cancel()
+
+        # --- BUILDING_MODEL: the prior gate, before any compute is spent ---------
+        runs.set_state(run_id, RunState.BUILDING_MODEL)
+        prior_gate_fn(data, config)
+        guard_cancel()
+
+        # --- VALIDATING_MODEL: gather the evidence *before* the main fit ---------
+        # Deliberately first. The held-back window and the placebo channel are independent
+        # fits on the same data and configuration, so they do not need the main posterior —
+        # and running them first means a configuration that cannot even fit a shorter
+        # window is found out before the full-budget fit is spent on it. It also means the
+        # main fit produces its summary and its verdict in one pass, instead of the model
+        # graph being rebuilt afterwards to re-summarise it.
+        runs.set_state(run_id, RunState.VALIDATING_MODEL)
+        sample = sanitize_sample(run.get("sample_params"))
+        seed = int(run.get("seed") or sample.get("seed") or 0)
+        sample["seed"] = seed
+        holdout, placebo = evidence_fn(data, config, seed=seed, log=log)
+        guard_cancel()
+
+        # --- SAMPLING ------------------------------------------------------------
+        runs.set_state(run_id, RunState.SAMPLING)
+        try:
+            summary, idata = fit_fn(
+                data, config, holdout_mape=holdout, placebo_share=placebo, **sample
+            )
+        except SpecError:
+            raise
+        except Exception as exc:  # a sampler failure is its own, non-retryable category
+            # Keep the exception type in the message: "'google_spend'" alone tells the
+            # builder nothing, while "KeyError: 'google_spend'" points straight at a column
+            # the configuration names and the master table does not have.
+            raise _SamplingFailed(f"{type(exc).__name__}: {exc}") from exc
+        runs.heartbeat(run_id)
+        guard_cancel()
+
+        # --- CALCULATING_RESULTS -------------------------------------------------
+        runs.set_state(run_id, RunState.CALCULATING_RESULTS)
+        payload = summary.to_json_dict()
+        runs.save_diagnostics(
+            run_id,
+            {
+                "convergence": {
+                    "max_r_hat": summary.diagnostics.max_r_hat,
+                    "min_ess_bulk": summary.diagnostics.min_ess_bulk,
+                    "min_ess_tail": summary.diagnostics.min_ess_tail,
+                    "n_divergences": summary.diagnostics.n_divergences,
+                    "min_e_bfmi": summary.diagnostics.min_e_bfmi,
+                    "n_max_treedepth": summary.diagnostics.n_max_treedepth,
+                },
+                "fit": {
+                    "r2": summary.diagnostics.r2,
+                    "mape": summary.diagnostics.mape,
+                    "interval_coverage_94": summary.diagnostics.interval_coverage_94,
+                    "interval_coverage_80": summary.diagnostics.interval_coverage_80,
+                    "interval_coverage_50": summary.diagnostics.interval_coverage_50,
+                    "residual_autocorrelation": summary.diagnostics.residual_autocorrelation,
+                    "decomposition_ok": summary.diagnostics.decomposition_ok,
+                },
+                "identifiability": payload.get("identifiability"),
+                "out_of_sample": {"holdout_mape": holdout},
+                "placebo": {"contribution_share": placebo},
+            },
         )
-        quality = _quality_to_json(build.report)
+        if summary.validation is not None:
+            runs.save_validation(run_id, summary.validation.to_json_dict())
 
-        if build.report.has_errors:
-            reason = "; ".join(i.message for i in build.report.errors)
-            jobstore.mark_failed(job_id, f"data quality errors: {reason}")
-            return {"status": "failed", "reason": "data_quality", "quality": quality}
-
-        jobstore.update_progress(job_id, "sampling")
-        summary, idata = fit_fn(build.data, spec.model, **spec.sample)
-
-        if spec.evaluation.cross_validation or spec.evaluation.placebo:
-            summary = evaluate_fn(build.data, spec.model, summary, spec.evaluation)
-
-        jobstore.update_progress(job_id, "saving")
-        # Heavy trace -> Storage; small summary -> Postgres.
+        # The heavy trace goes to Storage. If that upload fails the run still completes —
+        # but the omission is recorded rather than silently swallowed, because a result
+        # without its trace can never be re-analysed and the user deserves to know.
         artifact_path: str | None = None
         try:
-            data = netcdf_bytes(idata)
-            artifact_path = f"{artifact_prefix}/{project_id}/{job_id}.nc"
-            storage.upload(artifact_path, data, "application/x-netcdf")
-        except Exception:
-            artifact_path = None  # a missing trace must not lose the usable summary
+            artifact_path = f"{artifact_prefix}/{project_id}/{run_id}.nc"
+            storage.upload(artifact_path, netcdf_bytes(idata), "application/x-netcdf")
+        except Exception as exc:
+            artifact_path = None
+            log(f"trace not stored: {type(exc).__name__}: {exc}")
 
-        run_id = jobstore.save_model_run(
-            project_id=project_id,
-            job_id=job_id,
-            summary=summary.to_json_dict(),
-            quality=quality,
-            inference_data_path=artifact_path,
+        runs.save_results(run_id, project_id, payload, artifact_path)
+        runs.mark_completed(
+            run_id,
+            provenance={
+                "dataset_sha256": dataset.get("master_sha256"),
+                "spec_sha256": configuration.get("spec_sha256"),
+                "seed": seed,
+                "sample_params": sample,
+                "package_versions": _package_versions(),
+                "worker_image_digest": os.environ.get("MODAL_IMAGE_ID"),
+                "log_tail": "\n".join(log_lines[-50:]) or None,
+            },
         )
-        jobstore.mark_succeeded(job_id)
         return {
             "status": "succeeded",
-            "model_run_id": run_id,
+            "run_id": run_id,
+            "level": summary.validation.level.value if summary.validation else None,
             "inference_data_path": artifact_path,
         }
 
-    except Exception as exc:
-        jobstore.mark_failed(job_id, f"{type(exc).__name__}: {exc}")
-        return {"status": "failed", "reason": "exception", "error": str(exc)}
-
-
-def run_hier_job(
-    jobstore: JobStore,
-    storage: Storage,
-    job_id: str,
-    *,
-    fit_fn=None,
-    netcdf_bytes=_default_netcdf_bytes,
-    artifact_prefix: str = "runs",
-) -> dict:
-    """Run one hierarchical (multi-region) fit job end-to-end — the ``type='fit_hierarchical'``
-    counterpart of :func:`run_job`. Same status-transition/error-handling contract; the
-    difference is downloading + aligning sources per region
-    (:func:`mmm_core.build_master_datasets_by_region`) and fitting
-    :func:`mmm_core.model.hierarchical.fit_hierarchical` instead of the single-region path.
-    """
-    if fit_fn is None:
-        from mmm_core.model.hierarchical import fit_hierarchical as fit_fn  # type: ignore
-
-    job = jobstore.get_job(job_id)
-    project_id = job["project_id"]
-    jobstore.mark_running(job_id)
-
-    try:
-        spec = parse_hier_job_config(job["config"])
-    except Exception as exc:  # malformed config is a permanent failure
-        jobstore.mark_failed(job_id, f"invalid job config: {exc}")
-        return {"status": "failed", "reason": "invalid_config", "error": str(exc)}
-
-    try:
-        jobstore.update_progress(job_id, "downloading")
-        sources_by_region = {}
-        transforms_by_region = {}
-        for region, refs in spec.regions.items():
-            frames = []
-            for ref in refs:
-                raw = storage.download(ref.storage_path)
-                frames.append((ref.spec, read_table(ref.storage_path, raw)))
-            sources_by_region[region] = frames
-            transforms_by_region[region] = source_transforms_map(refs)
-
-        jobstore.update_progress(job_id, "building_dataset")
-        region_frames, report = build_master_datasets_by_region(
-            sources_by_region,
-            event_dummies=list(spec.event_dummies),
-            features=list(spec.features),
-            source_transforms=transforms_by_region,
+    except RunCancelled:
+        runs.mark_failed(
+            run_id,
+            code=ErrorCode.CANCELLED,
+            user_message=USER_MESSAGES[ErrorCode.CANCELLED],
+            technical="cancelled by user request",
+            retryable=False,
         )
-        quality = _quality_to_json(report)
+        return {"status": "cancelled", "run_id": run_id}
 
-        if report.has_errors or not region_frames:
-            reason = "; ".join(i.message for i in report.errors) or "no overlapping region data"
-            jobstore.mark_failed(job_id, f"data quality errors: {reason}")
-            return {"status": "failed", "reason": "data_quality", "quality": quality}
-
-        jobstore.update_progress(job_id, "sampling")
-        summary, idata = fit_fn(region_frames, spec.model, **spec.sample)
-
-        jobstore.update_progress(job_id, "saving")
-        artifact_path: str | None = None
-        try:
-            data = netcdf_bytes(idata)
-            artifact_path = f"{artifact_prefix}/{project_id}/{job_id}.nc"
-            storage.upload(artifact_path, data, "application/x-netcdf")
-        except Exception:
-            artifact_path = None  # a missing trace must not lose the usable summary
-
-        # A `kind` discriminator so the wizard can tell a hierarchical summary apart from
-        # a single-region FitSummary — HierSummary itself stays a plain mmm-core dataclass
-        # with no notion of this app-level convention.
-        summary_json = summary.to_json_dict()
-        summary_json["kind"] = "hierarchical"
-
-        run_id = jobstore.save_model_run(
-            project_id=project_id,
-            job_id=job_id,
-            summary=summary_json,
-            quality=quality,
-            inference_data_path=artifact_path,
+    except _SamplingFailed as exc:
+        runs.mark_failed(
+            run_id,
+            code=ErrorCode.SAMPLING_FAILED,
+            user_message=USER_MESSAGES[ErrorCode.SAMPLING_FAILED],
+            technical=f"{exc}\n{traceback.format_exc(limit=8)}",
+            retryable=False,
         )
-        jobstore.mark_succeeded(job_id)
-        return {
-            "status": "succeeded",
-            "model_run_id": run_id,
-            "inference_data_path": artifact_path,
-        }
+        return {"status": "failed", "run_id": run_id, "code": ErrorCode.SAMPLING_FAILED}
+
+    except SpecError as exc:
+        # A prior-gate refusal is a specification problem, but it deserves its own code so
+        # the app can send the user back to the tuning step rather than to the data step.
+        code = (
+            ErrorCode.PRIOR_GATE_FAILED
+            if "aannames" in str(exc)
+            else ErrorCode.CONFIG_INVALID
+        )
+        runs.mark_failed(
+            run_id,
+            code=code,
+            user_message=f"{USER_MESSAGES[code]}\n\n{exc}",
+            technical=str(exc),
+            retryable=False,
+        )
+        return {"status": "failed", "run_id": run_id, "code": code}
 
     except Exception as exc:
-        jobstore.mark_failed(job_id, f"{type(exc).__name__}: {exc}")
-        return {"status": "failed", "reason": "exception", "error": str(exc)}
+        code = _classify(exc)
+        runs.mark_failed(
+            run_id,
+            code=code,
+            user_message=USER_MESSAGES[code],
+            technical=f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=8)}",
+            retryable=code in ErrorCode.RETRYABLE,
+        )
+        return {"status": "failed", "run_id": run_id, "code": code}
+
+
+class _SamplingFailed(Exception):
+    """The sampler itself failed. Retrying an identical configuration will fail again."""

@@ -274,12 +274,20 @@ def prior_predictive_check(
     from mmm_core.model.build import build_model
 
     built = build_model(data, config)
-    y_max = float(built.scalers["y_max"])
     with built.model:
         idata = pm.sample_prior_predictive(draws=draws, random_seed=seed)
-    y_prior = idata.prior_predictive["y"].to_numpy().reshape(-1) * y_max
+    y_prior = idata.prior_predictive["y"].to_numpy().reshape(-1)
+    # The additive link fits a max-scaled KPI, so the draws have to be scaled back before
+    # they can be compared with the observed range. The count link works on raw counts and
+    # must NOT be scaled — doing so silently multiplied the implied range by the KPI's
+    # maximum and made the check meaningless for every leads/orders model.
+    if not config.likelihood.is_count:
+        y_prior = y_prior * float(built.scalers["y_max"])
 
-    observed = data[config.kpi].to_numpy(dtype=float)
+    # Compare against the window the model was actually fitted on: the adstock warm-up
+    # weeks are not part of the likelihood, so they are not part of what the priors have to
+    # admit either.
+    observed = data[config.kpi].to_numpy(dtype=float)[built.observed_slice]
     obs_low, obs_high = float(observed.min()), float(observed.max())
     prior_low, prior_high = float(np.percentile(y_prior, 0.5)), float(np.percentile(y_prior, 99.5))
 

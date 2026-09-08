@@ -1,109 +1,157 @@
-import pandas as pd
+"""Building one dataset version, without Supabase or Modal.
+
+The important property under test is not "the merge works" — mmm-core's own suite covers
+that — but that a recipe cannot reach data it has no right to, and that a failure leaves
+the row in a state the user can act on rather than stuck on 'building'.
+"""
+
+from __future__ import annotations
+
+import hashlib
+
 import pytest
 
-from fakes import FakeDatasetStore, FakeJobStore, FakeStorage
-from mmm_worker.prepare import run_prepare
-from mmm_worker.jobspec import parse_prepare_config
+from mmm_worker.prepare import build_dataset_version
+from mmm_worker.ports import ErrorCode
+from tests.fakes import FakeDatasetStore, FakeStorage
+
+KPI_CSV = "week,revenue\n" + "".join(
+    f"2024-{1 + i // 4:02d}-{1 + (i % 4) * 7:02d},{1000 + i * 10}\n" for i in range(40)
+)
+SPEND_CSV = "date,spend\n" + "".join(
+    f"2024-{1 + i // 4:02d}-{1 + (i % 4) * 7:02d},{100 + i}\n" for i in range(40)
+)
+
+RECIPE = {
+    "sources": [
+        {
+            "source_file_id": "file-kpi",
+            "name": "revenue",
+            "date_column": "week",
+            "columns": [{"name": "revenue", "role": "kpi"}],
+        },
+        {
+            "source_file_id": "file-spend",
+            "name": "search",
+            "date_column": "date",
+            "columns": [{"name": "spend", "role": "spend", "output_name": "search_spend"}],
+        },
+    ]
+}
 
 
-def _csv(start, periods, value_col, value):
-    dates = pd.date_range(start, periods=periods, freq="D")
-    return pd.DataFrame({"date": dates, value_col: value}).to_csv(index=False).encode()
+def _store(recipe=None, paths=None):
+    return FakeDatasetStore(
+        {"id": "ds-1", "project_id": "proj-1", "recipe": recipe if recipe is not None else RECIPE},
+        storage_paths=paths
+        if paths is not None
+        else {"file-kpi": "proj-1/kpi.csv", "file-spend": "proj-1/spend.csv"},
+    )
 
 
-def _recipe(dataset_id="ds-1"):
-    return {
-        "dataset_id": dataset_id,
+def _storage(**kw):
+    return FakeStorage(
+        {"proj-1/kpi.csv": KPI_CSV.encode(), "proj-1/spend.csv": SPEND_CSV.encode()}, **kw
+    )
+
+
+# --- the happy path -----------------------------------------------------------------
+
+
+def test_a_built_dataset_is_hashed_so_a_run_can_be_traced_back_to_it():
+    store, storage = _store(), _storage()
+    result = build_dataset_version(store, storage, "ds-1")
+    assert result["status"] == "ready"
+    written = storage.uploads[result["master_path"]]
+    assert store.ready["master_sha256"] == hashlib.sha256(written).hexdigest()
+
+
+def test_the_report_carries_roles_window_and_a_preview():
+    store, storage = _store(), _storage()
+    build_dataset_version(store, storage, "ds-1")
+    ready = store.ready
+    assert ready["column_roles"] == {"revenue": "kpi", "search_spend": "spend"}
+    assert ready["window_start"] and ready["window_end"]
+    assert ready["n_weeks"] > 0
+    assert ready["verdict"] in ("usable", "usable_with_warnings")
+    assert ready["preview"]["head"] and ready["preview"]["summary"]["revenue"]["role"] == "kpi"
+
+
+def test_the_suitability_report_is_kept_even_on_a_clean_build():
+    """The informational issues explain what was decided automatically; dropping them on a
+    clean build would make those decisions invisible."""
+    store, storage = _store(), _storage()
+    build_dataset_version(store, storage, "ds-1")
+    assert "issues" in store.ready["suitability"]
+
+
+# --- a recipe cannot reach another project's data --------------------------------------
+
+
+def test_a_source_file_outside_this_project_is_refused():
+    """v1 took `storage_path` straight from the client and downloaded it with the
+    service-role key, which bypasses row-level security. The recipe now carries ids, and
+    they are resolved against this project's own rows."""
+    store = _store(paths={"file-kpi": "proj-1/kpi.csv"})  # 'file-spend' belongs elsewhere
+    result = build_dataset_version(store, _storage(), "ds-1")
+    assert result["code"] == ErrorCode.CONFIG_INVALID
+    assert store.dataset["status"] == "failed"
+    assert "does not belong to this project" in store.failure["technical"]
+
+
+def test_there_is_no_way_to_name_a_raw_path_in_a_recipe():
+    recipe = {
         "sources": [
-            {"name": "revenue", "storage_path": "rev.csv", "date_column": "date",
-             "columns": [{"name": "revenue", "role": "kpi"}]},
-            {"name": "google", "storage_path": "g.csv", "date_column": "date",
-             "columns": [{"name": "spend", "role": "spend", "output_name": "google_spend"}]},
-        ],
+            {
+                "storage_path": "some-other-project/secrets.csv",
+                "name": "sneaky",
+                "columns": [{"name": "revenue", "role": "kpi"}],
+            }
+        ]
     }
+    store = _store(recipe=recipe)
+    result = build_dataset_version(store, _storage(), "ds-1")
+    # Missing `source_file_id`, so it fails on the contract rather than being honoured.
+    assert result["code"] == ErrorCode.CONFIG_INVALID
 
 
-def _job(config, project_id="proj-1", job_id="job-1"):
-    return {"id": job_id, "project_id": project_id, "type": "prepare", "config": config}
+# --- idempotency ------------------------------------------------------------------------
 
 
-# --- config parsing --------------------------------------------------------------
-
-def test_parse_prepare_config_has_sources_and_dummies():
-    cfg = _recipe()
-    cfg["event_dummies"] = [{"name": "d_2025w45", "weeks": [[2025, 45]]}]
-    spec = parse_prepare_config(cfg)
-    assert [s.storage_path for s in spec.sources] == ["rev.csv", "g.csv"]
-    assert spec.event_dummies[0].name == "d_2025w45"
-
-
-# --- happy path ------------------------------------------------------------------
-
-def test_prepare_merges_and_writes_master_and_preview():
-    files = {"rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-             "g.csv": _csv("2022-01-03", 84, "spend", 50.0)}
-    store = FakeJobStore(_job(_recipe()))
-    datasets = FakeDatasetStore()
-
-    result = run_prepare(store, datasets, FakeStorage(files), "job-1")
-
-    assert result["status"] == "succeeded"
-    assert store.status == "succeeded"
-    assert datasets.prepared is not None
-    p = datasets.prepared
-    assert p["master_path"] == "datasets/proj-1/ds-1.csv"
-    assert p["n_weeks"] == 12                       # 84 daily rows -> 12 ISO weeks
-    assert p["column_roles"] == {"revenue": "kpi", "google_spend": "spend"}
-    assert p["window_start"] == "2022-01-03"
-    # preview carries a head/tail and per-column summary the wizard can render
-    assert p["preview"]["columns"][0]["name"] in {"revenue", "google_spend"}
-    assert len(p["preview"]["head"]) == 6
-    assert "revenue" in p["preview"]["summary"]
-    # the merged master file was actually written (uploaded)
+def test_a_second_container_for_the_same_dataset_does_nothing():
+    store, storage = _store(), _storage()
+    build_dataset_version(store, storage, "ds-1")
+    uploads_before = dict(storage.uploads)
+    assert build_dataset_version(store, storage, "ds-1") == {
+        "status": "skipped",
+        "reason": "already_claimed",
+    }
+    assert storage.uploads == uploads_before
 
 
-def test_prepare_master_file_is_written_to_storage():
-    files = {"rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-             "g.csv": _csv("2022-01-03", 84, "spend", 50.0)}
-    storage = FakeStorage(files)
-    run_prepare(FakeJobStore(_job(_recipe())), FakeDatasetStore(), storage, "job-1")
-    assert "datasets/proj-1/ds-1.csv" in storage.uploads
-    body = storage.uploads["datasets/proj-1/ds-1.csv"].decode()
-    assert "week_start" in body and "google_spend" in body
+# --- failures leave an actionable row ------------------------------------------------------
 
 
-# --- failure handling ------------------------------------------------------------
-
-def test_prepare_data_quality_error_marks_dataset_failed():
-    # revenue and spend never overlap -> ingestion reports an error, no master written.
-    files = {"rev.csv": _csv("2022-01-03", 30, "revenue", 1000.0),
-             "g.csv": _csv("2022-06-01", 30, "spend", 50.0)}
-    datasets = FakeDatasetStore()
-    store = FakeJobStore(_job(_recipe()))
-
-    result = run_prepare(store, datasets, FakeStorage(files), "job-1")
-
-    assert result["status"] == "failed"
-    assert result["reason"] == "data_quality"
-    assert store.status == "failed"
-    assert datasets.failed is not None
-    assert datasets.prepared is None
+def test_a_data_quality_error_is_explained_in_plain_language():
+    # Two sources with no overlapping period at all.
+    late = "date,spend\n2030-01-07,100\n2030-01-14,120\n2030-01-21,90\n"
+    storage = FakeStorage({"proj-1/kpi.csv": KPI_CSV.encode(), "proj-1/spend.csv": late.encode()})
+    store = _store()
+    result = build_dataset_version(store, storage, "ds-1")
+    assert result["code"] == ErrorCode.DATA_QUALITY
+    assert store.dataset["status"] == "failed"
+    assert "niet gebruikt worden" in store.failure["user_message"]
+    assert store.failure["technical"]
 
 
-def test_prepare_missing_dataset_id_fails():
-    cfg = _recipe()
-    del cfg["dataset_id"]
-    store = FakeJobStore(_job(cfg))
-    result = run_prepare(store, FakeDatasetStore(), FakeStorage({}), "job-1")
-    assert result["status"] == "failed"
-    assert result["reason"] == "no_dataset_id"
+def test_a_storage_outage_is_reported_as_such_not_as_bad_data():
+    store = _store()
+    result = build_dataset_version(store, FakeStorage({}), "ds-1")
+    assert result["code"] == ErrorCode.STORAGE_UNAVAILABLE
+    assert store.dataset["status"] == "failed"
 
 
-def test_prepare_invalid_recipe_marks_failed():
-    cfg = {"dataset_id": "ds-1", "sources": []}  # no sources
-    store = FakeJobStore(_job(cfg))
-    datasets = FakeDatasetStore()
-    result = run_prepare(store, datasets, FakeStorage({}), "job-1")
-    assert result["status"] == "failed"
-    assert result["reason"] == "invalid_config"
-    assert datasets.failed is not None
+def test_a_failure_never_leaves_the_row_building():
+    store = _store()
+    build_dataset_version(store, FakeStorage({}), "ds-1")
+    assert store.dataset["status"] != "building"

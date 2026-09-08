@@ -1,264 +1,306 @@
+"""The model-run lifecycle, without Supabase, Modal or a sampler.
+
+Each test here corresponds to a failure the audit found in the v1 worker:
+
+* a job could be claimed and run twice, producing two results for one job;
+* a run could reach the sampler on priors its own data could never produce;
+* a raw Python traceback was written to a field the user reads;
+* a transient storage blip was a permanent failure;
+* the out-of-sample evidence existed but was opt-in and never switched on.
+"""
+
+from __future__ import annotations
+
 import pandas as pd
 import pytest
 
-from fakes import FakeJobStore, FakeStorage, StubSummary, make_stub_fit, make_stub_hier_fit
-from mmm_worker.runner import run_hier_job, run_job
+from mmm_worker.jobspec import serialize_model_config
+from mmm_worker.ports import ErrorCode, RunState
+from mmm_worker.runner import RunCancelled, run_model_run
+from tests.fakes import (
+    FakeRunStore,
+    FakeStorage,
+    StubSummary,
+    make_stub_evidence,
+    make_stub_fit,
+    no_prior_gate,
+)
+
+MASTER_CSV = (
+    "week_start,revenue,search\n"
+    + "".join(
+        f"2024-{1 + i // 28:02d}-{1 + i % 28:02d},{1000 + i * 3},{100 + i}\n" for i in range(40)
+    )
+)
 
 
-def _csv(start, periods, value_col, value):
-    dates = pd.date_range(start, periods=periods, freq="D")
-    return pd.DataFrame({"date": dates, value_col: value}).to_csv(index=False).encode()
+def _spec():
+    from mmm_core.model import ChannelConfig, ChannelUnit, ModelConfig
+
+    return serialize_model_config(
+        ModelConfig(
+            kpi="revenue",
+            channels=(ChannelConfig("search", unit=ChannelUnit.CURRENCY),),
+        )
+    )
 
 
-def _job(config, project_id="proj-1", job_id="job-1"):
-    return {"id": job_id, "project_id": project_id, "config": config}
-
-
-def _overlapping_config():
-    return {
-        "sources": [
-            {"name": "revenue", "storage_path": "rev.csv", "date_column": "date",
-             "columns": [{"name": "revenue", "role": "kpi"}]},
-            {"name": "google", "storage_path": "g.csv", "date_column": "date",
-             "columns": [{"name": "spend", "role": "spend", "output_name": "google_spend"}]},
-        ],
-        "model": {"kpi": "revenue", "channels": [{"name": "google_spend", "channel_type": "intent"}]},
-        "sample": {"draws": 100, "tune": 100, "chains": 2, "bogus": 1},
+def _store(**run_overrides):
+    run = {
+        "id": "run-1",
+        "project_id": "proj-1",
+        "model_configuration_id": "cfg-1",
+        "dataset_version_id": "ds-1",
+        "state": RunState.QUEUED,
+        "seed": 7,
+        "sample_params": {"draws": 500, "tune": 500, "chains": 2},
+        **run_overrides,
     }
+    return FakeRunStore(
+        run=run,
+        configuration={"id": "cfg-1", "resolved_spec": _spec(), "spec_sha256": "spec-hash"},
+        dataset={
+            "id": "ds-1",
+            "status": "ready",
+            "master_path": "datasets/proj-1/ds-1.csv",
+            "master_sha256": "data-hash",
+        },
+    )
 
 
-def test_happy_path_persists_summary_and_uploads_trace():
-    files = {"rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-             "g.csv": _csv("2022-01-03", 84, "spend", 50.0)}
-    store = FakeJobStore(_job(_overlapping_config()))
-    storage = FakeStorage(files)
-    fit = make_stub_fit()
+def _storage(**kw):
+    return FakeStorage({"datasets/proj-1/ds-1.csv": MASTER_CSV.encode()}, **kw)
 
-    result = run_job(store, storage, "job-1", fit_fn=fit, netcdf_bytes=lambda idata: b"NETCDF")
 
+def _run(store, storage=None, **kw):
+    kw.setdefault("fit_fn", make_stub_fit())
+    kw.setdefault("evidence_fn", make_stub_evidence())
+    kw.setdefault("prior_gate_fn", no_prior_gate)
+    return run_model_run(store, storage or _storage(), "run-1", **kw)
+
+
+# --- the happy path -----------------------------------------------------------------
+
+
+def test_a_run_walks_the_whole_state_machine():
+    store = _store()
+    result = _run(store)
     assert result["status"] == "succeeded"
-    assert store.status == "succeeded"
-    assert store.progress == "saving"  # last phase written before completion
-    assert len(store.runs) == 1
-    assert store.runs[0]["summary"]["kpi"] == "revenue"
-    # bogus sample key filtered out, unsafe values clamped before reaching the fit
-    assert fit.calls[0]["kwargs"] == {"draws": 250, "tune": 250, "chains": 4}
-    # heavy trace uploaded under runs/<project>/<job>.nc
-    assert store.runs[0]["inference_data_path"] == "runs/proj-1/job-1.nc"
-    assert storage.uploads["runs/proj-1/job-1.nc"] == b"NETCDF"
+    assert store.states == [
+        RunState.VALIDATING,
+        RunState.PREPARING_DATA,
+        RunState.BUILDING_MODEL,
+        RunState.VALIDATING_MODEL,
+        RunState.SAMPLING,
+        RunState.CALCULATING_RESULTS,
+        RunState.COMPLETED,
+    ]
 
 
-def test_data_quality_error_fails_job_without_fitting():
-    # revenue and spend never overlap -> ingestion reports an error, fit must not run.
-    files = {"rev.csv": _csv("2022-01-03", 30, "revenue", 1000.0),
-             "g.csv": _csv("2022-06-01", 30, "spend", 50.0)}
-    store = FakeJobStore(_job(_overlapping_config()))
+def test_everything_needed_to_reproduce_the_run_is_recorded():
+    """v1 recorded none of this, so a published number could not be traced to its inputs."""
+    store = _store()
+    _run(store)
+    p = store.completed
+    assert p["dataset_sha256"] == "data-hash"
+    assert p["spec_sha256"] == "spec-hash"
+    assert p["seed"] == 7
+    assert p["sample_params"]["draws"] == 500
+    assert "mmm_core" in p["package_versions"]
+    assert "python" in p["package_versions"]
+
+
+def test_results_diagnostics_and_validation_are_stored_separately():
+    store = _store()
+    _run(store)
+    assert store.results["project_id"] == "proj-1"
+    assert store.diagnostics["convergence"]["max_r_hat"] == 1.0
+    assert store.diagnostics["out_of_sample"] == {"holdout_mape": 0.12}
+    assert store.diagnostics["placebo"] == {"contribution_share": 0.01}
+    assert store.validation["level"] == "statistically_valid"
+
+
+def test_the_trace_is_uploaded_to_storage():
+    store = _store()
+    storage = _storage()
+    result = _run(store, storage)
+    assert result["inference_data_path"] == "runs/proj-1/run-1.nc"
+    assert "runs/proj-1/run-1.nc" in storage.uploads
+
+
+# --- idempotency: the bug that ran some fits twice ------------------------------------
+
+
+def test_a_second_container_for_the_same_run_does_nothing():
+    """The whole idempotency guarantee: the loser of the claim writes nothing at all."""
+    store = _store()
+    _run(store)
+    before = (store.results, store.completed, len(store.states))
+
     fit = make_stub_fit()
+    second = _run(store, fit_fn=fit)
 
-    result = run_job(store, FakeStorage(files), "job-1", fit_fn=fit, netcdf_bytes=lambda i: b"")
-
-    assert result["status"] == "failed"
-    assert result["reason"] == "data_quality"
-    assert store.status == "failed"
-    assert store.progress == "building_dataset"  # never advanced to "sampling"
-    assert fit.calls == []          # never fitted
-    assert store.runs == []
+    assert second == {"status": "skipped", "reason": "already_claimed"}
+    assert fit.calls == [], "the second container ran the fit anyway"
+    assert (store.results, store.completed, len(store.states)) == before
 
 
-def test_invalid_config_is_permanent_failure():
-    bad = _overlapping_config()
-    del bad["model"]
-    store = FakeJobStore(_job(bad))
+def test_a_run_that_is_not_queued_is_never_claimed():
+    store = _store(state=RunState.SAMPLING)
     fit = make_stub_fit()
-
-    result = run_job(store, FakeStorage({}), "job-1", fit_fn=fit)
-
-    assert result["status"] == "failed"
-    assert result["reason"] == "invalid_config"
+    assert _run(store, fit_fn=fit)["status"] == "skipped"
     assert fit.calls == []
 
 
-def test_event_dummy_flows_through_to_the_fit():
-    # 84 daily rows from Monday 2022-01-03 span ISO weeks (2022, 1) .. (2022, 12).
-    files = {"rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-             "g.csv": _csv("2022-01-03", 84, "spend", 50.0)}
-    config = _overlapping_config()
-    config["event_dummies"] = [{"name": "dummy_2022w2", "weeks": [[2022, 2]]}]
-    store = FakeJobStore(_job(config))
+# --- the prior gate, which v1 computed and then ignored --------------------------------
+
+
+def test_priors_that_exclude_the_observed_kpi_stop_the_run_before_sampling():
+    from mmm_worker.jobspec import SpecError
+
+    def refusing_gate(data, config):
+        raise SpecError(
+            "de aannames sluiten je eigen cijfers uit: ze impliceren een KPI tussen 1 en 2"
+        )
+
+    store = _store()
     fit = make_stub_fit()
+    result = _run(store, prior_gate_fn=refusing_gate, fit_fn=fit)
 
-    result = run_job(store, FakeStorage(files), "job-1", fit_fn=fit, netcdf_bytes=lambda i: b"")
+    assert result["code"] == ErrorCode.PRIOR_GATE_FAILED
+    assert fit.calls == [], "compute was spent on a model the priors had already ruled out"
+    assert store.run["state"] == RunState.FAILED
+    # The user is sent to the tuning step, and told what the mismatch was.
+    assert "afstemming" in store.failure["user_message"]
+    assert "impliceren een KPI" in store.failure["user_message"]
 
-    assert result["status"] == "succeeded"
-    call = fit.calls[0]
-    assert "dummy_2022w2" in call["columns"]
-    assert "dummy_2022w2" in call["model"].control_columns
+
+# --- evidence gathering ----------------------------------------------------------------
 
 
-def test_evaluation_flags_off_by_default_never_call_evaluate_fn():
-    files = {"rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-             "g.csv": _csv("2022-01-03", 84, "spend", 50.0)}
-    store = FakeJobStore(_job(_overlapping_config()))
-    calls = []
+def test_the_evidence_reaches_the_fit_so_it_can_reach_the_top_rung():
+    store = _store()
+    fit = make_stub_fit()
+    _run(store, fit_fn=fit, evidence_fn=make_stub_evidence(holdout=0.09, placebo=0.002))
+    assert fit.calls[0]["holdout_mape"] == 0.09
+    assert fit.calls[0]["placebo_share"] == 0.002
 
-    def evaluate_fn(data, model, summary, evaluation):
-        calls.append(evaluation)
-        return summary
 
-    result = run_job(
-        store, FakeStorage(files), "job-1",
-        fit_fn=make_stub_fit(), evaluate_fn=evaluate_fn, netcdf_bytes=lambda i: b"",
+def test_evidence_runs_before_the_main_fit():
+    """A configuration that cannot fit a shorter window should not cost a full-budget fit."""
+    order: list[str] = []
+
+    def evidence(data, config, *, seed, log):
+        order.append("evidence")
+        return 0.1, 0.01
+
+    def fit(data, config, **kw):
+        order.append("fit")
+        return StubSummary(), _Idata()
+
+    class _Idata:
+        def to_netcdf(self, path):
+            open(path, "wb").write(b"x")
+
+    _run(_store(), fit_fn=fit, evidence_fn=evidence)
+    assert order == ["evidence", "fit"]
+
+
+def test_unmeasurable_evidence_is_passed_as_none_not_faked():
+    store = _store()
+    fit = make_stub_fit()
+    _run(store, fit_fn=fit, evidence_fn=make_stub_evidence(holdout=None, placebo=None))
+    assert fit.calls[0]["holdout_mape"] is None
+    assert store.diagnostics["out_of_sample"] == {"holdout_mape": None}
+
+
+# --- failures ---------------------------------------------------------------------------
+
+
+def test_a_sampler_failure_is_not_retried():
+    """An identical configuration will diverge identically; retrying only burns compute."""
+    store = _store()
+    result = _run(store, fit_fn=make_stub_fit(raises=RuntimeError("chains did not converge")))
+    assert result["code"] == ErrorCode.SAMPLING_FAILED
+    assert store.failure["retryable"] is False
+    assert store.run["state"] == RunState.FAILED
+    assert store.requeued is False
+
+
+def test_a_storage_failure_is_retried():
+    store = _store()
+    result = run_model_run(
+        store,
+        FakeStorage({}),  # the master is missing -> download raises
+        "run-1",
+        fit_fn=make_stub_fit(),
+        evidence_fn=make_stub_evidence(),
+        prior_gate_fn=no_prior_gate,
     )
+    assert result["code"] == ErrorCode.STORAGE_UNAVAILABLE
+    assert store.failure["retryable"] is True
+    assert store.requeued is True
+    assert store.run["state"] == RunState.QUEUED
 
-    assert result["status"] == "succeeded"
-    assert calls == []
 
-
-def test_evaluation_flag_on_calls_evaluate_fn_and_uses_its_summary():
-    files = {"rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-             "g.csv": _csv("2022-01-03", 84, "spend", 50.0)}
-    config = _overlapping_config()
-    config["evaluation"] = {"placebo": True}
-    store = FakeJobStore(_job(config))
-    calls = []
-
-    def evaluate_fn(data, model, summary, evaluation):
-        calls.append(evaluation)
-        return StubSummary(payload={**summary.to_json_dict(), "evaluated": True})
-
-    result = run_job(
-        store, FakeStorage(files), "job-1",
-        fit_fn=make_stub_fit(), evaluate_fn=evaluate_fn, netcdf_bytes=lambda i: b"",
+def test_a_retry_is_bounded_by_max_attempts():
+    store = _store()
+    store.run["attempt"] = 2  # the claim will make it 3, past max_attempts=2
+    run_model_run(
+        store, FakeStorage({}), "run-1",
+        fit_fn=make_stub_fit(), evidence_fn=make_stub_evidence(), prior_gate_fn=no_prior_gate,
     )
-
-    assert result["status"] == "succeeded"
-    assert len(calls) == 1
-    assert calls[0].placebo is True
-    assert calls[0].cross_validation is False
-    assert store.runs[0]["summary"]["evaluated"] is True
+    assert store.run["state"] == RunState.FAILED
+    assert store.requeued is False
 
 
-def test_evaluate_fn_failure_fails_the_job_like_any_other_exception():
-    # A sub-evaluation is meant to be defensive internally (mmm_worker.runner's real
-    # _run_extra_evaluations swallows its own exceptions per-check), but if the injected
-    # evaluate_fn itself raises, run_job's outer handler still catches it like any other
-    # unexpected error rather than silently losing the job.
-    files = {"rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-             "g.csv": _csv("2022-01-03", 84, "spend", 50.0)}
-    config = _overlapping_config()
-    config["evaluation"] = {"cross_validation": True}
-    store = FakeJobStore(_job(config))
-
-    def boom(data, model, summary, evaluation):
-        raise RuntimeError("evaluation blew up")
-
-    result = run_job(
-        store, FakeStorage(files), "job-1",
-        fit_fn=make_stub_fit(), evaluate_fn=boom, netcdf_bytes=lambda i: b"",
-    )
-
-    assert result["status"] == "failed"
-    assert store.status == "failed"
-    assert store.runs == []
+def test_the_user_never_sees_a_traceback():
+    """v1 wrote `f"{type(exc).__name__}: {exc}"` into the field the wizard renders."""
+    store = _store()
+    _run(store, fit_fn=make_stub_fit(raises=KeyError("google_spend")))
+    assert "KeyError" not in store.failure["user_message"]
+    assert "Traceback" not in store.failure["user_message"]
+    # ... while the builder can still see exactly what happened.
+    assert "KeyError" in store.failure["technical"]
 
 
-def test_trace_upload_failure_does_not_lose_summary():
-    files = {"rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-             "g.csv": _csv("2022-01-03", 84, "spend", 50.0)}
-    store = FakeJobStore(_job(_overlapping_config()))
-
-    def boom(idata):
-        raise RuntimeError("storage down")
-
-    result = run_job(store, FakeStorage(files), "job-1", fit_fn=make_stub_fit(), netcdf_bytes=boom)
-
-    assert result["status"] == "succeeded"           # summary still saved
-    assert store.runs[0]["inference_data_path"] is None
+def test_a_dataset_that_is_not_ready_is_refused():
+    store = _store()
+    store.dataset["status"] = "failed"
+    result = _run(store)
+    assert result["code"] == ErrorCode.CONFIG_INVALID
+    assert store.run["state"] == RunState.FAILED
 
 
-# --- hierarchical (multi-region) jobs ---------------------------------------------
-
-def _hier_region_sources(prefix):
-    return {
-        "sources": [
-            {"name": "revenue", "storage_path": f"{prefix}_rev.csv", "date_column": "date",
-             "columns": [{"name": "revenue", "role": "kpi"}]},
-            {"name": "google", "storage_path": f"{prefix}_g.csv", "date_column": "date",
-             "columns": [{"name": "spend", "role": "spend", "output_name": "google_spend"}]},
-        ]
-    }
+def test_a_corrupt_specification_fails_permanently():
+    store = _store()
+    store.configuration["resolved_spec"] = {"kpi": "revenue"}  # no channels
+    result = _run(store)
+    assert result["code"] == ErrorCode.CONFIG_INVALID
+    assert store.failure["retryable"] is False
 
 
-def _hier_config():
-    return {
-        "regions": {"NL": _hier_region_sources("nl"), "BE": _hier_region_sources("be")},
-        "model": {"kpi": "revenue", "channels": [{"name": "google_spend", "channel_type": "intent"}]},
-        "sample": {"draws": 100, "tune": 100, "chains": 2},
-    }
+# --- cancellation -------------------------------------------------------------------------
 
 
-def _hier_job(config, project_id="proj-1", job_id="job-1"):
-    return {"id": job_id, "project_id": project_id, "config": config}
-
-
-def test_hier_happy_path_persists_summary_with_kind_marker():
-    files = {
-        "nl_rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-        "nl_g.csv": _csv("2022-01-03", 84, "spend", 50.0),
-        "be_rev.csv": _csv("2022-01-03", 84, "revenue", 800.0),
-        "be_g.csv": _csv("2022-01-03", 84, "spend", 40.0),
-    }
-    store = FakeJobStore(_hier_job(_hier_config()))
-    storage = FakeStorage(files)
-    fit = make_stub_hier_fit()
-
-    result = run_hier_job(store, storage, "job-1", fit_fn=fit, netcdf_bytes=lambda idata: b"NETCDF")
-
-    assert result["status"] == "succeeded"
-    assert store.status == "succeeded"
-    assert len(store.runs) == 1
-    assert store.runs[0]["summary"]["kind"] == "hierarchical"
-    assert fit.calls[0]["regions"] == ["BE", "NL"]
-    assert store.runs[0]["inference_data_path"] == "runs/proj-1/job-1.nc"
-
-
-def test_hier_missing_regions_is_permanent_failure():
-    bad = _hier_config()
-    del bad["regions"]
-    store = FakeJobStore(_hier_job(bad))
-    fit = make_stub_hier_fit()
-
-    result = run_hier_job(store, FakeStorage({}), "job-1", fit_fn=fit)
-
-    assert result["status"] == "failed"
-    assert result["reason"] == "invalid_config"
+def test_a_cancelled_run_stops_and_says_so():
+    store = _store()
+    store.run["cancel_requested"] = True
+    fit = make_stub_fit()
+    result = _run(store, fit_fn=fit)
+    assert result["status"] == "cancelled"
+    assert store.run["state"] == RunState.CANCELLED
     assert fit.calls == []
+    assert "gestopt" in store.failure["user_message"]
 
 
-def test_hier_single_region_is_invalid_config():
-    cfg = _hier_config()
-    del cfg["regions"]["BE"]
-    store = FakeJobStore(_hier_job(cfg))
-
-    result = run_hier_job(store, FakeStorage({}), "job-1", fit_fn=make_stub_hier_fit())
-
-    assert result["status"] == "failed"
-    assert result["reason"] == "invalid_config"
+# --- the trace is a bonus, never a reason to lose a result -----------------------------
 
 
-def test_hier_non_overlapping_regions_fails_as_data_quality():
-    # BE's data starts 6 months after NL's -> no shared window across regions.
-    files = {
-        "nl_rev.csv": _csv("2022-01-03", 84, "revenue", 1000.0),
-        "nl_g.csv": _csv("2022-01-03", 84, "spend", 50.0),
-        "be_rev.csv": _csv("2022-07-04", 84, "revenue", 800.0),
-        "be_g.csv": _csv("2022-07-04", 84, "spend", 40.0),
-    }
-    store = FakeJobStore(_hier_job(_hier_config()))
-    fit = make_stub_hier_fit()
-
-    result = run_hier_job(store, FakeStorage(files), "job-1", fit_fn=fit)
-
-    assert result["status"] == "failed"
-    assert result["reason"] == "data_quality"
-    assert fit.calls == []
+def test_a_failed_trace_upload_still_completes_but_records_the_omission():
+    """Without its trace a result can never be re-analysed, so silence is not acceptable."""
+    store = _store()
+    result = _run(store, _storage(fail_upload=True))
+    assert result["status"] == "succeeded"
+    assert result["inference_data_path"] is None
+    assert "trace not stored" in store.completed["log_tail"]

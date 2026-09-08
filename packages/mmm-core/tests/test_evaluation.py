@@ -145,3 +145,68 @@ def test_judge_placebo_fails_for_large_share():
 def test_judge_placebo_missing_channel_raises():
     with pytest.raises(ValueError):
         judge_placebo(_stub_summary({"g": 0.4}), "placebo")
+
+
+# --- prior-predictive scaling per link ------------------------------------------------
+# The additive link fits a max-scaled KPI, the count link fits raw counts. Scaling the
+# count draws by the KPI maximum — as the pre-refactor code did unconditionally — inflated
+# the implied range by that factor and made the check useless for every leads/orders model,
+# which is exactly the kind of KPI it matters most for.
+
+
+def test_prior_predictive_scales_the_additive_link_back_to_kpi_units():
+    pytest.importorskip("pymc")
+    import numpy as np
+    import pandas as pd
+
+    from mmm_core.evaluation import prior_predictive_check
+    from mmm_core.model import ChannelIntent, ChannelUnit, KpiType, ModelIntent
+    from mmm_core.model import build_model_config, measure_dataset
+
+    rng = np.random.default_rng(0)
+    n = 80
+    idx = pd.date_range("2023-01-02", periods=n, freq="7D", name="week_start")
+    spend = np.abs(rng.normal(1_000, 250, n)) + 100
+    data = pd.DataFrame({"revenue": 50_000 + 3 * spend + rng.normal(0, 800, n), "ch": spend}, index=idx)
+    stats = measure_dataset(data, "revenue", ["ch"])
+    config = build_model_config(
+        ModelIntent(
+            kpi="revenue", kpi_type=KpiType.REVENUE,
+            channels=(ChannelIntent("ch", ChannelUnit.CURRENCY),),
+        ),
+        stats,
+    ).config
+    result = prior_predictive_check(data, config, draws=200)
+    # In KPI units, not on the 0-1 axis: a range topping out below 2 would mean the draws
+    # were never scaled back.
+    assert result.prior_high > 1_000
+    assert result.observed_high > 1_000
+
+
+def test_prior_predictive_does_not_rescale_the_count_link():
+    pytest.importorskip("pymc")
+    import numpy as np
+    import pandas as pd
+
+    from mmm_core.evaluation import prior_predictive_check
+    from mmm_core.model import ChannelIntent, ChannelUnit, KpiType, ModelIntent
+    from mmm_core.model import build_model_config, measure_dataset
+
+    rng = np.random.default_rng(1)
+    n = 90
+    idx = pd.date_range("2023-01-02", periods=n, freq="7D", name="week_start")
+    spend = np.abs(rng.normal(1_000, 250, n)) + 100
+    data = pd.DataFrame({"leads": rng.poisson(15, n).astype(float), "ch": spend}, index=idx)
+    stats = measure_dataset(data, "leads", ["ch"])
+    config = build_model_config(
+        ModelIntent(
+            kpi="leads", kpi_type=KpiType.LEADS,
+            channels=(ChannelIntent("ch", ChannelUnit.CURRENCY),),
+        ),
+        stats,
+    ).config
+    assert config.likelihood.is_count
+    result = prior_predictive_check(data, config, draws=200)
+    # Counts around 15/week: a prior range in the thousands would mean the draws were
+    # multiplied by the KPI maximum on a link that never scaled them in the first place.
+    assert result.prior_high < 1_000

@@ -1,31 +1,23 @@
 """Modal application: run the fit off the request path, with no time pressure.
 
-Deploy (locally, with your own Modal token — never committed):
+Deploy (locally, with your own Modal token — never committed)::
 
     modal deploy mmm_worker/modal_app.py
 
-Secrets come from a Modal Secret named ``mmm-supabase`` holding:
-    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, MMM_RAW_BUCKET, MMM_ARTIFACTS_BUCKET
+Secrets come from a Modal Secret named ``mmm-supabase`` holding SUPABASE_URL,
+SUPABASE_SERVICE_ROLE_KEY, MMM_RAW_BUCKET, MMM_ARTIFACTS_BUCKET and MMM_ENQUEUE_TOKEN.
 
-Flow:
-    * ``enqueue`` (web endpoint) — the Next.js backend POSTs a job_id after inserting a
-      'queued' job; we spawn ``run_fit`` and return immediately.
-    * ``run_fit`` — the fit itself, capped at RUN_TIMEOUT_SECONDS and at most
-      MAX_CONCURRENT_RUNS containers at once (see below). Reads sources from Storage,
-      runs mmm-core, writes the summary to Postgres and the .nc trace to Storage.
-    * ``poll_queue`` (every minute) — safety net that picks up any 'queued' jobs that
-      were never enqueued (e.g. a dropped web call).
+Three things changed from v1, each closing a specific failure:
 
-Cost guardrails (deliberately conservative while testing on small datasets):
-    * MAX_CONCURRENT_RUNS caps how many fits Modal will ever run at once. Excess
-      invocations queue on Modal's side rather than erroring here — the actual
-      user-facing rejection ("er draaien al 2 fits") happens earlier, in the wizard's
-      /api/jobs route, which checks in-flight job count before creating a job at all.
-      This constant is the infrastructure-level backstop for that check, not a
-      replacement for it. Keep both in sync if you ever change the limit.
-    * RUN_TIMEOUT_SECONDS caps a single fit's maximum runtime. 15 minutes is generous
-      headroom for the small test datasets in use now; raise it deliberately (and
-      re-check MAX_CONCURRENT_RUNS's cost impact) before fitting larger, real datasets.
+* **Separate functions per kind of work.** A dataset build takes seconds and one core; a
+  fit takes minutes and four. Sharing one function meant they shared one timeout and one
+  container pool, so a crashed five-second build held a fit slot for thirty-five minutes.
+* **The enqueue endpoint is authenticated, and its contract is correct.** It was an open
+  POST endpoint, and the app called it with a JSON body while FastAPI expected a query
+  parameter — so the call failed with a 422 on every single job, silently, and every run
+  waited for the one-minute poll instead.
+* **The poller claims before it spawns.** v1 re-spawned every queued row each minute
+  regardless of whether one was already starting, which ran some fits twice.
 """
 
 from __future__ import annotations
@@ -35,29 +27,27 @@ import pathlib
 
 import modal
 
-# mmm-core is a local package (packages/mmm-core), never published to PyPI, so it
-# cannot be `pip install`-ed by name. We copy its source into the build context and
-# install it from that local path instead — this needs no local pip/editable install on
-# the machine running `modal deploy`, just the source tree from the git clone.
+# mmm-core is a local package (packages/mmm-core), never published to PyPI, so it cannot be
+# `pip install`-ed by name. We copy its source into the build context and install it from
+# that local path instead — this needs no local pip/editable install on the machine running
+# `modal deploy`, just the source tree from the git clone.
 _HERE = pathlib.Path(__file__).parent
 _MMM_CORE_DIR = (_HERE.parent.parent / "packages" / "mmm-core").resolve()
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
     # OpenBLAS + toolchain: without these PyTensor falls back to un-linked numpy dot
-    # ("PyTensor could not link to a BLAS installation") and every graph evaluation —
-    # prior predictive, model build, any C-backend op — runs an order of magnitude slower.
+    # ("PyTensor could not link to a BLAS installation") and every graph evaluation runs an
+    # order of magnitude slower.
     .apt_install("libopenblas-dev", "g++", "gfortran")
     .add_local_dir(str(_MMM_CORE_DIR), remote_path="/root/mmm-core", copy=True)
     .run_commands("pip install '/root/mmm-core[model]'")
     .pip_install("supabase>=2.6", "pandas>=2.1", "openpyxl>=3.1", "fastapi[standard]")
     .env(
         {
-            # Link PyTensor's C backend against OpenBLAS explicitly.
             "PYTENSOR_FLAGS": "blas__ldflags=-lopenblas,cxx=/usr/bin/g++",
-            # JAX sees one CPU "device" by default, which makes numpyro run the 4 NUTS
-            # chains sequentially. Expose 4 host devices so chains sample in parallel —
-            # this alone cuts wall-clock time roughly 4x on a 4-CPU container.
+            # JAX sees one CPU "device" by default, which makes numpyro run the chains
+            # sequentially. Expose 4 host devices so chains sample in parallel.
             "XLA_FLAGS": "--xla_force_host_platform_device_count=4",
             # One BLAS/OpenMP thread per chain: 4 parallel chains x N threads would
             # oversubscribe the container and slow everything down.
@@ -72,120 +62,170 @@ app = modal.App("mmm-worker")
 
 _SECRET = modal.Secret.from_name("mmm-supabase")
 
-MAX_CONCURRENT_RUNS = 2
-RUN_TIMEOUT_SECONDS = 30 * 60
-# A 'running' job whose container died (timeout/OOM/preemption) never reaches
-# mark_failed — poll_queue reaps those so they stop blocking the capacity check forever.
-STALE_RUNNING_SECONDS = RUN_TIMEOUT_SECONDS + 5 * 60
+# A fit runs the main model plus two lighter evidence fits (held-back window, placebo
+# channel), so the ceiling is higher than v1's single fit.
+FIT_TIMEOUT_SECONDS = 45 * 60
+PREPARE_TIMEOUT_SECONDS = 10 * 60
+MAX_CONCURRENT_FITS = 2
+MAX_CONCURRENT_PREPARES = 4
+# A container that dies without reaching mark_failed (timeout kill, OOM, preemption) leaves
+# its row mid-state. The reaper looks at the heartbeat rather than the start time, so a
+# long-but-healthy fit is never mistaken for a dead one.
+STALE_HEARTBEAT_SECONDS = 10 * 60
 
 
-def _run(job_id: str) -> dict:
-    from mmm_worker.prepare import run_prepare
-    from mmm_worker.runner import run_hier_job, run_job
+def _backends():
     from mmm_worker.supabase_backends import (
         SupabaseDatasetStore,
-        SupabaseJobStore,
+        SupabaseRunStore,
         SupabaseStorage,
         make_client,
     )
 
     client = make_client()
-    jobstore = SupabaseJobStore(client)
-    storage = SupabaseStorage(client, os.environ.get("MMM_RAW_BUCKET", "mmm-raw-data"))
-    # The .nc trace goes to the artifacts bucket; raw source downloads come from raw.
+    raw = SupabaseStorage(client, os.environ.get("MMM_RAW_BUCKET", "mmm-raw-data"))
     artifacts = SupabaseStorage(client, os.environ.get("MMM_ARTIFACTS_BUCKET", "mmm-artifacts"))
 
-    # Compose a storage that downloads from raw and uploads to artifacts (for the fit's
-    # heavy trace).
     class _Split:
+        """Read source data from the raw bucket, write heavy traces to artifacts."""
+
         def download(self, path):
-            return storage.download(path)
+            return raw.download(path)
 
         def upload(self, path, data, content_type):
             return artifacts.upload(path, data, content_type)
 
-    # One queue, three job types: a fast 'prepare' (merge + quality-check the raw uploads
-    # into one master table), the single-region 'fit', and the multi-region
-    # 'fit_hierarchical'. Dispatch on the job's type.
-    job = jobstore.get_job(job_id)
-    if job.get("type") == "prepare":
-        # 'prepare' downloads raw sources AND writes its merged master file back into the
-        # SAME (raw) bucket — the master file becomes an ordinary source for a later fit
-        # job, which only ever downloads from the raw bucket. Writing it to artifacts
-        # instead would make it invisible to that download.
-        return run_prepare(jobstore, SupabaseDatasetStore(client), storage, job_id)
-    if job.get("type") == "fit_hierarchical":
-        return run_hier_job(jobstore, _Split(), job_id)
-    if job.get("type") == "prior_predictive":
-        # Cheap "is this config sane before we spend a fit?" check — builds the master and
-        # asks what KPI range the priors imply (no MCMC). Reads raw like a fit does.
-        from mmm_worker.prior_predictive import run_prior_predictive
-
-        return run_prior_predictive(jobstore, _Split(), job_id)
-    return run_job(jobstore, _Split(), job_id)
+    return client, SupabaseRunStore(client), SupabaseDatasetStore(client), raw, _Split()
 
 
 @app.function(
     image=image,
     secrets=[_SECRET],
-    timeout=RUN_TIMEOUT_SECONDS,
-    max_containers=MAX_CONCURRENT_RUNS,
-    # A Bayesian fit is CPU-bound: without an explicit reservation Modal gives the
-    # container a fraction of a core and a 3-minute fit stretches past 20. 4 cores map
-    # one-to-one onto the 4 parallel NUTS chains (see XLA_FLAGS on the image).
+    timeout=FIT_TIMEOUT_SECONDS,
+    max_containers=MAX_CONCURRENT_FITS,
+    # A Bayesian fit is CPU-bound: without an explicit reservation Modal gives the container
+    # a fraction of a core. Four cores map one-to-one onto the four parallel NUTS chains.
     cpu=4.0,
     memory=8192,
 )
-def run_fit(job_id: str) -> dict:
-    return _run(job_id)
+def run_fit(run_id: str) -> dict:
+    from mmm_worker.runner import run_model_run
+
+    _, runs, _, _, split = _backends()
+    return run_model_run(runs, split, run_id, worker_id=os.environ.get("MODAL_TASK_ID", "modal"))
+
+
+@app.function(
+    image=image,
+    secrets=[_SECRET],
+    timeout=PREPARE_TIMEOUT_SECONDS,
+    max_containers=MAX_CONCURRENT_PREPARES,
+    cpu=1.0,
+    memory=2048,
+)
+def build_dataset(dataset_id: str) -> dict:
+    from mmm_worker.prepare import build_dataset_version
+
+    _, _, datasets, raw, _ = _backends()
+    # The merged master goes back into the RAW bucket on purpose: a later fit only ever
+    # downloads from raw, so writing it to artifacts would make it invisible to that run.
+    return build_dataset_version(
+        datasets, raw, dataset_id, worker_id=os.environ.get("MODAL_TASK_ID", "modal")
+    )
 
 
 @app.function(image=image, secrets=[_SECRET])
 @modal.fastapi_endpoint(method="POST")
-def enqueue(job_id: str):
-    call = run_fit.spawn(job_id)
+def enqueue(payload: dict) -> dict:
+    """Nudge the worker to pick a row up now instead of waiting for the poll.
+
+    Authenticated with a shared token from the Modal Secret. v1 exposed this as an open
+    endpoint, so anyone who knew the URL could spawn work; and because the parameter was a
+    bare ``str``, FastAPI read it as a *query* parameter while the app sent a JSON body —
+    every call 422'd, was swallowed by the caller's try/except, and every job silently
+    waited a full minute for the fallback poll.
+    """
+    from fastapi import HTTPException
+
+    expected = os.environ.get("MMM_ENQUEUE_TOKEN")
+    if not expected or payload.get("token") != expected:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    kind = payload.get("kind")
+    row_id = payload.get("id")
+    if not row_id or kind not in ("fit", "dataset"):
+        raise HTTPException(status_code=400, detail="kind must be 'fit' or 'dataset', with an id")
+
+    call = (run_fit if kind == "fit" else build_dataset).spawn(row_id)
     return {"spawned": True, "call_id": call.object_id}
 
 
 @app.function(image=image, secrets=[_SECRET], schedule=modal.Period(minutes=1))
-def poll_queue() -> int:
-    """Pick up stray 'queued' jobs and reap orphaned 'running' jobs.
+def poll_queue() -> dict:
+    """Pick up queued work and reap rows whose container died.
 
-    The reaper is the safety net for containers that die without running mark_failed
-    (Modal timeout kill, OOM, preemption): such a job would otherwise stay 'running'
-    forever, permanently occupying a slot in both Modal's max_containers cap and the
-    wizard's /api/jobs capacity check — freezing the whole queue.
+    The poller deliberately does *not* claim: it spawns, and the claim inside the runner is
+    the single gate. That is what makes a duplicate spawn harmless — a second container
+    fails its compare-and-set and returns without touching anything, costing a container
+    start rather than a second five-minute fit. (Claiming here instead would be worse in a
+    subtle way: the row would leave 'queued' before the container exists, so a spawn that
+    never lands would strand it until the reaper noticed.)
     """
     import datetime
 
     from mmm_worker.supabase_backends import _SCHEMA, make_client
 
     client = make_client()
-    jobs = client.schema(_SCHEMA).table("jobs")
-
     cutoff = (
         datetime.datetime.now(datetime.timezone.utc)
-        - datetime.timedelta(seconds=STALE_RUNNING_SECONDS)
+        - datetime.timedelta(seconds=STALE_HEARTBEAT_SECONDS)
     ).isoformat()
-    jobs.update(
-        {
-            "status": "failed",
-            "finished_at": "now()",
-            "error": (
-                "De taak is afgebroken omdat hij de maximale rekentijd overschreed of de "
-                "rekenomgeving onverwacht stopte. Probeer het opnieuw; blijft dit gebeuren, "
-                "verklein dan het aantal draws of kanalen."
-            ),
-        }
-    ).eq("status", "running").lt("started_at", cutoff).execute()
 
-    rows = (
-        jobs.select("id")
-        .eq("status", "queued")
-        .order("created_at")
-        .limit(10)
+    runs_table = client.schema(_SCHEMA).table("model_runs")
+    datasets_table = client.schema(_SCHEMA).table("dataset_versions")
+
+    # Reap first, so a slot freed by a dead container is available to the spawns below.
+    reaped = (
+        runs_table.update(
+            {
+                "state": "failed",
+                "finished_at": "now()",
+                "state_changed_at": "now()",
+                "error_code": "TIMEOUT",
+                "error_message": (
+                    "De berekening is afgebroken omdat de rekenomgeving onverwacht stopte of "
+                    "de maximale rekentijd overschreed. Probeer het opnieuw; blijft dit "
+                    "gebeuren, verklein dan het aantal kanalen."
+                ),
+                "error_technical": "no heartbeat within the stale window",
+            }
+        )
+        .not_.in_("state", ["queued", "completed", "failed", "cancelled"])
+        .lt("heartbeat_at", cutoff)
         .execute()
     )
-    for row in rows.data or []:
+    datasets_table.update(
+        {
+            "status": "failed",
+            "error_code": "TIMEOUT",
+            "error_message": "Het samenvoegen is afgebroken. Probeer het opnieuw.",
+            "error_technical": "no heartbeat within the stale window",
+        }
+    ).eq("status", "building").lt("heartbeat_at", cutoff).execute()
+
+    spawned = {"fits": 0, "datasets": 0}
+    for row in (
+        runs_table.select("id").eq("state", "queued").order("created_at").limit(10).execute().data
+        or []
+    ):
         run_fit.spawn(row["id"])
-    return len(rows.data or [])
+        spawned["fits"] += 1
+    for row in (
+        datasets_table.select("id").eq("status", "queued").order("created_at").limit(10)
+        .execute().data
+        or []
+    ):
+        build_dataset.spawn(row["id"])
+        spawned["datasets"] += 1
+
+    return {**spawned, "reaped": len(reaped.data or [])}
