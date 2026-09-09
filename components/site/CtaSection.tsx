@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FIT_CRITERIA, SITE } from "@/lib/site/copy";
+import { SITE } from "@/lib/site/copy";
 import { Reveal } from "./motion";
 import { Container, Label } from "./primitives";
 
@@ -63,25 +63,33 @@ export function CtaSection() {
       <Container className="relative">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,34rem)] lg:gap-20">
           <Reveal>
-            <Label>Demo aanvragen</Label>
+            <Label>Hoofdstuk 08 · tot slot</Label>
             <h2 id="demo-titel" className="u-display u-h2 mt-6 max-w-[16ch] text-site-ink">
               Weet wat je
               <br />
               <span className="u-grad">mediabudget doet.</span>
             </h2>
             <p className="u-sub mt-7">
-              Begin met één vraag: wat doet ons mediabudget eigenlijk? In een demo van een half uur
-              laten we op een voorbeeldanalyse zien hoe media-effect zichtbaar wordt en welke vragen
+              Je hebt waarschijnlijk al genoeg data. De vraag is wat je ermee kunt begrijpen. Media
+              Mix Modeling brengt je mediabestedingen, bedrijfsresultaat en andere invloeden samen,
+              zodat je je volgende budgetbeslissing beter kunt onderbouwen.
+            </p>
+            <p className="mt-5 text-[0.9375rem] leading-relaxed text-site-muted">
+              In ongeveer 30 minuten laten we zien hoe zo&rsquo;n analyse eruitziet en welke vragen
               je ermee kunt beantwoorden.
             </p>
 
             <div className="mt-10 border-t border-site-line pt-8">
-              <Label tone="muted">Dit gesprek is nuttig als</Label>
+              <Label tone="muted">Wat we in het gesprek bekijken</Label>
               <ul className="mt-5 space-y-3">
-                {FIT_CRITERIA.map((criterion) => (
-                  <li key={criterion} className="flex gap-3 text-[0.9375rem] leading-relaxed text-site-muted">
+                {[
+                  "Hoe een analyse op een voorbeelddataset eruitziet, van bestedingen tot geschatte bijdrage.",
+                  "Welke data je zelf al hebt en wat er nodig is om ermee te rekenen.",
+                  "Welke vragen over je budgetverdeling je ermee kunt beantwoorden — en welke niet.",
+                ].map((item) => (
+                  <li key={item} className="flex gap-3 text-[0.9375rem] leading-relaxed text-site-muted">
                     <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-site-green-text" />
-                    {criterion}
+                    {item}
                   </li>
                 ))}
               </ul>

@@ -2,19 +2,17 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getViewer } from "@/lib/auth";
 import { siteUrl } from "@/lib/site/siteUrl";
-import { CaseSection } from "@/components/site/CaseSection";
+import { AudienceSection } from "@/components/site/AudienceSection";
 import { CtaSection } from "@/components/site/CtaSection";
-import { EffectSection } from "@/components/site/EffectSection";
+import { DecisionSection } from "@/components/site/DecisionSection";
 import { Hero } from "@/components/site/Hero";
-import { MethodSection } from "@/components/site/MethodSection";
-import { ProblemSection } from "@/components/site/ProblemSection";
-import { ReportingSection } from "@/components/site/ReportingSection";
-import { ScenarioSection } from "@/components/site/ScenarioSection";
+import { MeasurementSection } from "@/components/site/MeasurementSection";
+import { ModelSection } from "@/components/site/ModelSection";
+import { OutcomesSection } from "@/components/site/OutcomesSection";
+import { PerspectiveSection } from "@/components/site/PerspectiveSection";
+import { ProcessSection } from "@/components/site/ProcessSection";
 import { SiteFooter } from "@/components/site/SiteFooter";
 import { SiteHeader } from "@/components/site/SiteHeader";
-import { StatsBand } from "@/components/site/StatsBand";
-import { StepsSection } from "@/components/site/StepsSection";
-import { TrustSection } from "@/components/site/TrustSection";
 
 // Leest de ingelogde gebruiker (cookies), dus per request renderen.
 export const dynamic = "force-dynamic";
@@ -63,9 +61,9 @@ const structuredData = {
 };
 
 /**
- * De publieke site. Eén doorlopend verhaal: de vraag (waarom rapportage niet genoeg is), het
- * scenario en het effect (wat de analyse laat zien), het voorbeeld (hoe dat tot een besluit
- * leidt) en de onderbouwing (werkwijze, methode, onzekerheid).
+ * De publieke site: negen hoofdstukken die als één verhaal doorlopen, van de vraag "wat doet
+ * ons mediabudget?" tot de uitnodiging om er samen naar te kijken. Elk hoofdstuk heeft één
+ * visualisatie; de tekst doet de rest.
  */
 export default async function Home() {
   // Een ingelogde bouwer heeft niets aan de commerciële pagina: door naar de projecten.
@@ -84,16 +82,17 @@ export default async function Home() {
       <SiteHeader />
 
       <main id="main">
+        {/* Eén doorlopend verhaal: de vraag, waarom hij moeilijk te beantwoorden is, welk
+            perspectief dat verandert, wat het model oplevert, welke beslissing je ermee neemt,
+            wat je uiteindelijk krijgt, hoe het werkt, voor wie het is, en de uitnodiging. */}
         <Hero />
-        <StatsBand />
-        <ProblemSection />
-        <ReportingSection />
-        <ScenarioSection />
-        <EffectSection />
-        <CaseSection />
-        <StepsSection />
-        <MethodSection />
-        <TrustSection />
+        <MeasurementSection />
+        <PerspectiveSection />
+        <ModelSection />
+        <DecisionSection />
+        <OutcomesSection />
+        <ProcessSection />
+        <AudienceSection />
         <CtaSection />
       </main>
 

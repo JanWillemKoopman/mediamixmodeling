@@ -19,7 +19,9 @@ export function SiteFooter() {
               <br />
               <span className="u-grad">mediabudget doet.</span>
             </p>
-            <p className="mt-5 max-w-sm text-[0.9375rem] leading-relaxed text-site-muted">{SITE.tagline}</p>
+            <p className="mt-5 max-w-sm text-[0.9375rem] leading-relaxed text-site-muted">
+              {SITE.taglineTop} {SITE.taglineBottom}
+            </p>
             <a href="#demo" className="u-btn u-btn-primary group mt-8">
               {SITE.ctaPrimary}
               <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { CHANNELS, TOTAL_BUDGET } from "@/lib/site/exampleData";
+import { CHANNELS } from "@/lib/site/exampleData";
 
 export const runtime = "edge";
 export const alt = "Weet wat je mediabudget doet — van mediabudget naar geschat media-effect";
@@ -41,7 +41,7 @@ export default function Image() {
                   key={channel.key}
                   style={{
                     display: "flex",
-                    width: `${(channel.spend / TOTAL_BUDGET) * 100}%`,
+                    width: `${channel.spendShare}%`,
                     backgroundColor: "#C0C0C6",
                     borderRadius: 4,
                   }}
@@ -60,8 +60,8 @@ export default function Image() {
                   key={channel.key}
                   style={{
                     display: "flex",
-                    width: `${(channel.contribution / 7_700_000) * 100}%`,
-                    backgroundColor: channel.contribution < channel.spend ? "#8511D9" : "#2E9E50",
+                    width: `${channel.effectShare}%`,
+                    backgroundColor: channel.effectShare < channel.spendShare ? "#8511D9" : "#2E9E50",
                     borderRadius: 4,
                   }}
                 />

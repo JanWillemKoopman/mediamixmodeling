@@ -55,7 +55,7 @@ export function SiteHeader() {
         scrolled || open ? "border-b border-site-line bg-site-paper/90 backdrop-blur-xl" : "border-b border-transparent"
       }`}
     >
-      <div className="mx-auto flex h-full w-full max-w-[120rem] items-center justify-between gap-5 px-5 md:grid md:grid-cols-[0.5fr_2fr_0.5fr] xl:gap-16 xl:px-16">
+      <div className="mx-auto flex h-full w-full max-w-[120rem] items-center justify-between gap-5 px-5 md:grid md:grid-cols-[1fr_auto_1fr] xl:gap-16 xl:px-16">
         <a href="#top" className="-m-2 w-fit p-2" aria-label={`${SITE.wordmark} — naar boven`}>
           <Wordmark />
         </a>
