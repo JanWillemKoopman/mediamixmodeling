@@ -39,3 +39,42 @@ export async function loadLedger(projectId: string): Promise<Ledger> {
   }
   return ledger;
 }
+
+/**
+ * Een beslissing vastleggen.
+ *
+ * Eén rij per (project, stap): opnieuw beslissen overschrijft en schuift `decided_at` naar
+ * voren, waarmee alles wat ervan afhangt vanzelf als achterhaald zichtbaar wordt (zie
+ * lib/flow/state.ts). Bewust alleen aangeroepen vanuit app/api/flow/route.ts, zodat er geen
+ * tweede pad ontstaat waarlangs iets kan worden vastgelegd zonder dat het transcript het weet.
+ */
+export async function recordStepDecision(
+  projectId: string,
+  step: StepId,
+  decision: Record<string, unknown>,
+  summary: string,
+  userId: string,
+): Promise<{ error: string | null }> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .schema("mmm")
+    .from("project_steps")
+    .upsert(
+      {
+        project_id: projectId,
+        step,
+        decision,
+        summary,
+        decided_at: new Date().toISOString(),
+        decided_by: userId,
+      },
+      { onConflict: "project_id,step" },
+    );
+  return { error: error?.message ?? null };
+}
+
+/** Een beslissing terugnemen — de stap staat daarna weer open. */
+export async function clearStepDecision(projectId: string, step: StepId): Promise<void> {
+  const supabase = createClient();
+  await supabase.schema("mmm").from("project_steps").delete().eq("project_id", projectId).eq("step", step);
+}

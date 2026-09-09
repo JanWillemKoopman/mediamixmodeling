@@ -232,6 +232,19 @@ describe("invariant 5 — onomkeerbaar betekent bevestigd", () => {
     // zou anders stilletjes uit de lijst kunnen verdwijnen zonder dat een test klaagt.
     for (const id of LASTING) expect(seen.has(id), `${id} bestaat nergens meer`).toBe(true);
   });
+
+  it("een bevestiging zegt altijd waarvoor je tekent", () => {
+    // Anders is het geen bevestiging maar een extra klik, en klikt de gebruiker hem weg.
+    for (const { spec, snapshot, ledger } of WORLDS) {
+      for (const step of deriveFlowState(snapshot, ledger).steps) {
+        for (const action of step.actions) {
+          if (!action.confirms) continue;
+          expect(action.confirmPrompt, `${action.id} in ${describeWorld(spec)}`).toBeTruthy();
+          expect(action.confirmPrompt!.length, action.id).toBeGreaterThan(20);
+        }
+      }
+    }
+  });
 });
 
 // --- Invariant 6 -----------------------------------------------------------------------

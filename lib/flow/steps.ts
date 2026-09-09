@@ -67,6 +67,11 @@ export interface StepAction {
   label: string;
   tone: "primary" | "secondary";
   confirms: boolean;
+  /**
+   * Wat er gaat gebeuren, in mensentaal. Verplicht bij `confirms` — een bevestiging die
+   * niet zegt waarvoor je tekent, is geen bevestiging maar een extra klik.
+   */
+  confirmPrompt?: string;
   /** Springt naar een andere stap in plaats van hier iets te doen (terugkoppeling). */
   goTo?: StepId;
   /** Vraagt om vrije tekst in plaats van een enkele klik (bv. de bedrijfsomschrijving). */
@@ -88,8 +93,15 @@ export interface StepDefinition {
   id: StepId;
   number: number;
   label: string;
-  /** Waaróm deze stap bestaat — één zin, voor de balk en de opening van de gids. */
+  /** Waaróm deze stap bestaat — één zin, voor de balk. */
   purpose: string;
+  /**
+   * Waarmee de gids deze stap opent, in de chat. Vaste tekst: 0 tokens, en daardoor te
+   * toetsen. De begeleiding is een product-artefact, geen modeluitvoer — een wijziging
+   * hoort zichtbaar te zijn in de diff van een pull request (het golden transcript in
+   * lib/flow/__tests__/copy.test.ts legt ze vast).
+   */
+  opening: string;
   /** Stappen waarvan deze afhangt; een latere wijziging daar maakt deze stap achterhaald. */
   dependsOn: StepId[];
   /**
@@ -152,6 +164,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
     purpose:
       "Waar je op wilt sturen bepaalt welke uitkomst vooropgezet wordt en in welke woorden " +
       "de rest van dit traject met je praat.",
+    opening:
+      "Welkom. We gaan samen een marketingmodel bouwen dat laat zien wat jouw kanalen opleveren. Dat doen we in acht stappen; je ziet links steeds waar je bent.\n\nOm te beginnen: waar wil je antwoord op? Dat bepaalt wat ik straks vooropzet.",
     dependsOn: [],
     ledgerOnly: true,
     completableWithoutTyping: true,
@@ -176,6 +190,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
     purpose:
       "Eén bestand met per week je resultaat en je uitgaven per kanaal. Je ziet vooraf waar " +
       "het aan moet voldoen, en meteen na het uploaden of het bruikbaar is.",
+    opening:
+      "Nu je databestand. Eén bestand, met per week een regel.\n\nWat erin moet staan:\n- **Een datumkolom** — één rij per week (of per dag, dan tel ik ze zelf op)\n- **Je resultaat** — omzet, orders of leads: het getal waar je op stuurt\n- **Je uitgaven per kanaal** — één kolom per kanaal\n\nLiefst minstens een jaar aan weken. Minder kan, maar dan wordt het model onzekerder, en dat zeg ik je dan ook.",
     dependsOn: ["goal"],
     ledgerOnly: false,
     completableWithoutTyping: true,
@@ -187,7 +203,7 @@ export const STEPS: Record<StepId, StepDefinition> = {
     actions: (ctx) =>
       source(ctx)
         ? [
-            { id: "data.replace", label: "Ander bestand gebruiken", tone: "secondary", confirms: true },
+            { id: "data.replace", label: "Ander bestand gebruiken", tone: "secondary", confirms: true, confirmPrompt: "Je huidige bestand wordt vervangen. Alles wat je daarna hebt gedaan — kolommen, klaargemaakte data, berekeningen — hoort dan niet meer bij je nieuwe bestand." },
             { id: "data.continue", label: "Verder met dit bestand", tone: "primary", confirms: false },
           ]
         : [
@@ -205,6 +221,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
       "Welke kolom je resultaat is, welke kolommen kanalen zijn en waarin die gemeten zijn. " +
       "Een kanaal in GRP's dat voor euro's wordt aangezien, maakt elk budgetadvies later " +
       "betekenisloos — daarom kijken we hier samen.",
+    opening:
+      "Ik heb je bestand gelezen en per kolom een inschatting gemaakt: wat je datum is, wat je resultaat is, en welke kolommen kanalen zijn.\n\nLoop het even na. Vooral de eenheden: een kanaal dat in bereik of vertoningen staat maar voor euro's wordt aangezien, geeft later een rendement dat nergens op slaat.",
     dependsOn: ["data"],
     ledgerOnly: false,
     completableWithoutTyping: true,
@@ -235,6 +253,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
     purpose:
       "Gaten, uitschieters en kanalen die te veel op elkaar lijken. Elk punt wordt een " +
       "keuze in gewone taal, niet een instelling.",
+    opening:
+      "Nu maak ik je data klaar. Ik kijk naar ontbrekende weken, weken die er echt uitspringen, en kanalen die zo op elkaar lijken dat ze niet los te beoordelen zijn.\n\nWat ik tegenkom leg ik je voor als een gewone vraag — je hoeft geen instellingen te kiezen.",
     dependsOn: ["columns"],
     ledgerOnly: false,
     completableWithoutTyping: true,
@@ -257,21 +277,21 @@ export const STEPS: Record<StepId, StepDefinition> = {
       if (ds?.status === "queued" || ds?.status === "building") return [];
       if (ds?.status === "failed") {
         return [
-          { id: "prepare.retry", label: "Aanpassen en opnieuw proberen", tone: "primary", confirms: true },
+          { id: "prepare.retry", label: "Aanpassen en opnieuw proberen", tone: "primary", confirms: true, confirmPrompt: "Ik probeer het samenvoegen opnieuw, met je aanpassingen erin." },
           { id: "prepare.back", label: "Terug naar de kolommen", tone: "secondary", confirms: false, goTo: "columns" },
         ];
       }
       if (ds?.status === "ready" && !ds.approved_at) {
         return [
-          { id: "prepare.approve", label: "Dit ziet er goed uit", tone: "primary", confirms: true },
+          { id: "prepare.approve", label: "Dit ziet er goed uit", tone: "primary", confirms: true, confirmPrompt: "Hierna reken ik op deze data. Je kunt later terug, maar dan komt er een nieuwe versie bij." },
           { id: "prepare.adjust", label: "Ik wil iets aanpassen", tone: "secondary", confirms: false },
         ];
       }
       if (ctx.snapshot.approvedDataset) {
-        return [{ id: "prepare.rebuild", label: "Data opnieuw klaarmaken", tone: "secondary", confirms: true }];
+        return [{ id: "prepare.rebuild", label: "Data opnieuw klaarmaken", tone: "secondary", confirms: true, confirmPrompt: "Je data wordt opnieuw klaargemaakt. Je bestaande berekeningen blijven staan, maar horen dan bij de oude versie." }];
       }
       return [
-        { id: "prepare.start", label: "Maak mijn data klaar", tone: "primary", confirms: true },
+        { id: "prepare.start", label: "Maak mijn data klaar", tone: "primary", confirms: true, confirmPrompt: "Ik voeg je data samen tot één weektabel en controleer de kwaliteit. Duurt meestal minder dan een minuut." },
         { id: "prepare.note", label: "Eerst iets doorgeven over bijzondere weken", tone: "secondary", confirms: false, needsText: true },
       ];
     },
@@ -284,6 +304,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
     purpose:
       "Wat jij over je markt en je kanalen weet, is de sterkste input die dit model kan " +
       "krijgen. Geen getallen — en \"weet ik niet\" is overal een volwaardig antwoord.",
+    opening:
+      "Dit is de belangrijkste stap, en hij duurt maar even.\n\nWat jij over je markt weet, weet het model niet. Als jij zegt dat tv bij jullie wekenlang doorwerkt, hoeft het model dat niet uit de cijfers te raden — en wordt de uitkomst scherper.\n\nJe kiest geen getallen, alleen wat je verwacht. En **\"weet ik niet\" is een prima antwoord**: dan laat ik je data het volledig bepalen.",
     dependsOn: ["prepare"],
     ledgerOnly: true,
     // Het bedrijfsverhaal is vrije tekst, maar de stap is af te ronden met alleen keuzes:
@@ -331,6 +353,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
     purpose:
       "Eerst zie je precies wat er berekend gaat worden, dan pas begint het rekenen. " +
       "Dat duurt een paar minuten en je kunt intussen wegklikken.",
+    opening:
+      "Voordat ik ga rekenen, laat ik je zien wat er precies berekend wordt: je resultaat, je kanalen met hun eenheid, en wat je hebt aangegeven.\n\nDe berekening zelf duurt meestal 3 à 5 minuten. Je kunt intussen gerust wegklikken — ik onthoud waar we waren.",
     dependsOn: ["beliefs"],
     ledgerOnly: false,
     completableWithoutTyping: true,
@@ -354,15 +378,15 @@ export const STEPS: Record<StepId, StepDefinition> = {
         return [
           { id: "launch.diagnose", label: "Laat de gids meekijken wat er misging", tone: "primary", confirms: false },
           { id: "launch.adjust", label: "Mijn antwoorden aanpassen", tone: "secondary", confirms: false, goTo: "beliefs" },
-          { id: "launch.retry", label: "Opnieuw proberen", tone: "secondary", confirms: true },
+          { id: "launch.retry", label: "Opnieuw proberen", tone: "secondary", confirms: true, confirmPrompt: "Ik probeer de berekening opnieuw met dezelfde antwoorden." },
         ];
       }
       if (completedRun(ctx)) {
-        return [{ id: "launch.again", label: "Opnieuw berekenen", tone: "secondary", confirms: true }];
+        return [{ id: "launch.again", label: "Opnieuw berekenen", tone: "secondary", confirms: true, confirmPrompt: "Er komt een nieuwe berekening bij. Je bestaande resultaat blijft gewoon bestaan." }];
       }
       return [
         { id: "launch.review", label: "Laat zien wat er berekend wordt", tone: "primary", confirms: false },
-        { id: "launch.start", label: "Start de berekening", tone: "primary", confirms: true },
+        { id: "launch.start", label: "Start de berekening", tone: "primary", confirms: true, confirmPrompt: "De berekening start. Dit duurt meestal 3 à 5 minuten; je kunt intussen wegklikken." },
       ];
     },
   },
@@ -374,6 +398,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
     purpose:
       "Eerst of je hierop kunt sturen, dan wat er gebeurd is, dan pas de cijfers. " +
       "De techniek staat eronder, ingeklapt.",
+    opening:
+      "De berekening is klaar. Ik begin met het belangrijkste: kun je hierop sturen, of niet?\n\nDaarna wat er volgens het model gebeurd is, en pas daarna de cijfers zelf. De techniek staat eronder, ingeklapt — die hoef je niet te lezen.",
     dependsOn: ["launch"],
     ledgerOnly: true,
     completableWithoutTyping: true,
@@ -409,6 +435,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
     number: 8,
     label: "Delen",
     purpose: "Naar het klantdashboard, of als rapport mee. Met wat de klant wél en niet ziet.",
+    opening:
+      "Klaar om te delen. De klant krijgt een eigen pagina met dit resultaat: de uitkomst en de bandbreedte eromheen, geen ruwe data en geen chat.\n\nJe kunt eerst bekijken wat hij precies te zien krijgt.",
     dependsOn: ["results"],
     ledgerOnly: false,
     completableWithoutTyping: true,
@@ -443,7 +471,7 @@ export const STEPS: Record<StepId, StepDefinition> = {
       const run = completedRun(ctx);
       if (!run || !allows(run.validation, "publish")) return [];
       return [
-        { id: "share.publish", label: "Deel met de klant", tone: "primary", confirms: true },
+        { id: "share.publish", label: "Deel met de klant", tone: "primary", confirms: true, confirmPrompt: "De klant krijgt vanaf nu dit resultaat te zien op zijn eigen pagina, met de bandbreedte erbij." },
         { id: "share.preview", label: "Laat eerst zien wat de klant ziet", tone: "secondary", confirms: false },
       ];
     },

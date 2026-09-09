@@ -11,6 +11,27 @@ opgebouwd.
 
 ---
 
+## 0. Uitvoeringsstatus
+
+| Fase | Status | Wat er staat |
+|---|---|---|
+| 0 — Fundament | ✅ | `0024_flow_ledger.sql` (toegepast), `lib/flow/steps.ts` + `state.ts` + `ledger.ts`, de invarianten over 1584 toestanden, de route-bestaan-test |
+| 1 — Skelet | ✅ | `/projects/[id]/flow`: stappenbalk, permanent transcript, kaart-raamwerk, `POST /api/flow` |
+| 2 — Data-stappen | — | |
+| 3 — Model-stappen | — | |
+| 4 — Uitkomst | — | |
+| 5 — AI-laag | — | |
+| 6 — Afronden | — | |
+
+Onderweg gevonden en meteen gerepareerd: `GET /api/model-configurations/[id]` werd aangeroepen
+maar bestond niet, dus "gebruik de afstemming van run N" heeft nooit gewerkt.
+
+De nieuwe route staat náást de bestaande wizard; die blijft ongewijzigd werken tot fase 3 klaar
+is. Handelingen die nog niet gebouwd zijn, zeggen dat met zoveel woorden in plaats van stil te
+blijven.
+
+---
+
 ## 1. Wat er nu staat
 
 De wizard is één React-component (`components/wizard/ChatWizard.tsx`, 654 regels) met daarnaast:
