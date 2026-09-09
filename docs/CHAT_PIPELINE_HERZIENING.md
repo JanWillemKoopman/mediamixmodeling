@@ -338,15 +338,18 @@ de regels die niet mogen verschuiven. (Nieuwe dev-dependency — expliciete keuz
 
 ---
 
-## 8. Wat ik van je nodig heb
+## 8. Vastgelegde besluiten
 
-1. **Akkoord op deze aanpak** (herbouw van de flow-laag, statistiek en worker ongemoeid).
-2. **Bevestiging van de leesrichting van je eis.** Ik lees je tweede en derde zin als een beschrijving
-   van wat er nú misgaat (de chatbot helpt níét proactief, de gebruiker ziet níét in welke stap hij
-   zit, er ís geen logische flow) — en dus als de eis dat het omgekeerde moet gelden. Klopt dat?
-3. **Keuze-affordances in de chat.** Ik stel voor de "alles moet getypt worden"-regel los te laten:
-   een keuze krijgt knoppen, vrij typen blijft altijd mogelijk. Dat is de grootste enkele winst voor
-   een niet-technische gebruiker.
-4. **Stap 5 verplicht of overslaanbaar.** Ik stel *verplicht* voor (met "weet ik niet" overal als
-   antwoord, dus in 60 seconden af te ronden), omdat het de sterkste input van het model is.
-5. **Vitest toevoegen** voor de flow-logica — ja of nee.
+Bevestigd door de product owner voordat de bouw begint:
+
+1. **Leesrichting van de eis.** De gids moet wél proactief elke stap openen en afsluiten, de stap moet
+   altijd zichtbaar zijn, en er moet een logische flow zijn. De klachten in de opdracht beschreven de
+   huidige toestand; het omgekeerde is de eis.
+2. **Keuze-affordances.** De "alles moet getypt worden"-regel wordt losgelaten. Een keuze krijgt
+   knoppen in de stapkaart; vrij typen blijft altijd mogelijk voor vragen en voor invoer die geen
+   keuze is. Daarmee vervalt ook de heuristische menu-parser (`lib/wizard/questions.ts`) en de
+   categorie bugs die eraan hangt.
+3. **Stap 5 is verplicht**, niet overslaanbaar. Wel in ~60 seconden af te ronden: "weet ik niet" is
+   overal een volwaardig, gelijkwaardig zichtbaar antwoord dat het model gewoon de data laat bepalen.
+4. **Vitest wordt toegevoegd** voor de flow-logica: stap-afleiding, de poorten tussen stappen en de
+   `allows()`-gating van de uitkomstlagen. Draait mee in CI naast lint, typecheck en build.
