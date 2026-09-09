@@ -849,6 +849,18 @@ export function ResultsCharts({
           .filter((d): d is { name: string; delta: number; current: number; advised: number } => d !== null)
       : [];
   const reallocHeight = Math.max(120, reallocData.length * rowHeight);
+  // Channels the optimiser held fixed. Two reasons: the channel is not denominated in money
+  // (you cannot move a euro into a GRP), or the model could not tell it apart from another
+  // channel. Either way it drops out of the chart, so say why rather than let it vanish.
+  const fixedChannels = allocation?.fixed_channels ?? [];
+  const unusableChannels = new Set(
+    (summary.validation?.per_channel ?? []).filter((c) => !c.usable).map((c) => c.name),
+  );
+  const fixedReasons = fixedChannels.map((name) =>
+    unusableChannels.has(name)
+      ? `${name} (niet los van de andere kanalen vast te stellen)`
+      : `${name} (niet in euro's)`,
+  );
 
   return (
     <div className="space-y-6">
@@ -1018,6 +1030,12 @@ export function ResultsCharts({
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+          {fixedReasons.length > 0 && (
+            <p className="mt-2 text-xs text-fg-muted">
+              Buiten het advies gehouden: {fixedReasons.join(", ")}. Deze kanalen blijven op hun
+              huidige niveau staan — het model kan er geen budgetadvies over geven.
+            </p>
+          )}
         </ChartCard>
       )}
 

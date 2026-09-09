@@ -665,7 +665,12 @@ def summarize_fit(
     optimal_allocation: OptimalAllocation | None = None
     efficiency_frontier: list[FrontierPoint] = []
     if validation.allows(Output.RESPONSE_CURVES) or validation.allows(Output.BUDGET_ADVICE):
-        response_curves, optimal_allocation, efficiency_frontier = _planning_outputs(built, idata)
+        # The channels the verdict says get no individual number are also the channels no
+        # euro may be moved into: the optimiser holds them at today's level.
+        unidentifiable = frozenset(p.name for p in validation.per_channel if not p.usable)
+        response_curves, optimal_allocation, efficiency_frontier = _planning_outputs(
+            built, idata, unidentifiable=unidentifiable
+        )
         if not validation.allows(Output.BUDGET_ADVICE):
             optimal_allocation, efficiency_frontier = None, []
 
@@ -690,7 +695,7 @@ def summarize_fit(
 
 
 def _planning_outputs(
-    built: BuiltModel, idata
+    built: BuiltModel, idata, *, unidentifiable: frozenset[str] = frozenset()
 ) -> tuple[list[ResponseCurve], "OptimalAllocation | None", list[FrontierPoint]]:
     """Response curves, best reallocation of the current budget, and an efficiency frontier
     around it — all from the one posterior.
@@ -757,9 +762,22 @@ def _planning_outputs(
         # A budget can only be reallocated across channels denominated in money. Mixing
         # euros with GRPs or e-mail sendings into one "total weekly budget" and optimising
         # that produces a confident-looking number that means nothing.
-        monetary = [r for r in responses if r.is_monetary]
-        fixed = [r.name for r in responses if not r.is_monetary]
-        monetary_idx = [i for i, ch in enumerate(built.config.channels) if ch.unit.is_monetary]
+        #
+        # A channel the model cannot tell apart from another is held fixed for the same
+        # reason: its own effect is not established, so moving money into or out of it on
+        # the strength of this posterior is advice about an unanswered question. It keeps
+        # its response curve — the curve is honest about its own width — but it does not
+        # get traded.
+        def _tradeable(r) -> bool:
+            return r.is_monetary and r.name not in unidentifiable
+
+        monetary = [r for r in responses if _tradeable(r)]
+        fixed = [r.name for r in responses if not _tradeable(r)]
+        monetary_idx = [
+            i
+            for i, ch in enumerate(built.config.channels)
+            if ch.unit.is_monetary and ch.name not in unidentifiable
+        ]
         total_current = float(sum(built.spend[obs, i].mean() for i in monetary_idx))
         if monetary and total_current > 0:
             if is_count:

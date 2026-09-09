@@ -209,3 +209,64 @@ def test_missing_measurements_are_skipped_not_assumed_fine():
     # A NaN E-BFMI (sampler did not report it) must not be silently counted as a pass.
     v = validate_run(_diagnostics(min_e_bfmi=float("nan")), n_samples=2_000)
     assert not any(c.code == "energy_ok" for c in v.checks)
+
+
+# --- a per-channel problem is not a model-level veto ---------------------------------
+
+
+def _partly_inseparable():
+    """Four channels, two of which always moved together.
+
+    The realistic shape of a real account: most channels are fine, one pair is not.
+    """
+    rng = np.random.default_rng(7)
+    shared = rng.normal(100, 20, 3_000)
+    return assess_identifiability(
+        {
+            "twin_a": shared + rng.normal(0, 1, 3_000),
+            "twin_b": 200 - shared + rng.normal(0, 1, 3_000),
+            "clean_1": rng.normal(100, 4, 3_000),
+            "clean_2": rng.normal(100, 4, 3_000),
+        }
+    )
+
+
+def test_two_inseparable_channels_do_not_silence_advice_about_the_other_four():
+    """The point of per-channel verdicts.
+
+    An earlier version let any warning veto the top rung, so a single inseparable pair in a
+    six-channel model blocked budget advice about every other channel too — which is both
+    over-strict and the opposite of what a per-channel verdict is for. The pair still gets
+    no individual number; the rest of the model is unaffected.
+    """
+    ident = _partly_inseparable()
+    v = validate_run(
+        _diagnostics(), n_samples=2_000, identifiability=ident, holdout_mape=0.12,
+        placebo_share=0.01,
+    )
+
+    assert v.level is ValidationLevel.USABLE_FOR_DECISIONS
+    assert v.allows(Output.BUDGET_ADVICE)
+
+    unusable = {c.name for c in v.per_channel if not c.usable}
+    assert unusable, "the inseparable pair must still be marked unusable"
+    assert unusable <= {"twin_a", "twin_b"}
+    # And the user is told, rather than it silently passing.
+    assert any("kanaal" in w for w in v.warning_reasons)
+
+
+def test_a_model_level_warning_still_blocks_budget_advice():
+    """The relaxation above is narrow: only the per-channel verdict stops vetoing.
+
+    A sampler whose interval edges rest on too few draws is a problem with the *model*, and
+    budget advice is read off exactly those edges — so this must still block.
+    """
+    v = validate_run(
+        _diagnostics(min_ess_tail=120.0),
+        n_samples=2_000,
+        identifiability=_identifiable(),
+        holdout_mape=0.12,
+        placebo_share=0.01,
+    )
+    assert v.level is ValidationLevel.STATISTICALLY_VALID
+    assert not v.allows(Output.BUDGET_ADVICE)

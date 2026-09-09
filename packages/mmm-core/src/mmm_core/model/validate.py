@@ -46,7 +46,7 @@ import math
 from mmm_core.model.identify import IdentifiabilityReport, NOT_IDENTIFIED, WEAK
 
 # Bumped whenever a threshold or rule below changes. Stored alongside every verdict.
-RULESET_VERSION = "2024.1"
+RULESET_VERSION = "2024.2"
 
 
 class ValidationLevel(str, Enum):
@@ -423,7 +423,16 @@ def validate_run(
             generalises = holdout_mape is not None and math.isfinite(holdout_mape) and (
                 holdout_mape <= HOLDOUT_MAPE_WARN
             )
-            if has_identifiable and generalises and not warnings_failed:
+            # `all_channels_identifiable` is a verdict about *particular channels*, and it
+            # is already acted on: those channels get no individual number and the budget
+            # optimiser holds them fixed. Letting it veto the whole model as well would mean
+            # one inseparable pair in a six-channel model silences advice about the other
+            # four — the opposite of what per-channel verdicts are for. Every other warning
+            # is about the model or the sampler as a whole and does still block.
+            model_level_warnings = [
+                c for c in warnings_failed if c.code != "all_channels_identifiable"
+            ]
+            if has_identifiable and generalises and not model_level_warnings:
                 level = ValidationLevel.USABLE_FOR_DECISIONS
 
     return ModelValidation(

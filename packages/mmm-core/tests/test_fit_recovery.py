@@ -55,6 +55,13 @@ from mmm_core.model.fit import fit_model  # noqa: E402
 # mean something, few enough that the whole matrix stays runnable in CI.
 SAMPLE = dict(draws=500, tune=500, chains=2, seed=0)
 
+# A model only reaches `usable_for_decisions` if the tail of its posterior is estimated from
+# enough draws — budget advice is read off the edges of an interval, and noisy edges are not
+# a basis for moving money. That is a real rule, not a test artefact, so a test that asserts
+# on response curves or budget advice has to pay for the draws rather than have the rule
+# relaxed for it.
+DECISION_SAMPLE = dict(draws=1500, tune=1000, chains=2, seed=0)
+
 
 def _resolve(data: pd.DataFrame, channels: tuple[ChannelIntent, ...], **intent_kw):
     """Build the config exactly the way the product does: measure, then resolve intent."""
@@ -66,9 +73,28 @@ def _resolve(data: pd.DataFrame, channels: tuple[ChannelIntent, ...], **intent_k
     return resolved.config
 
 
-def _fit(data: pd.DataFrame, config):
+def _fit(data: pd.DataFrame, config, *, with_evidence: bool = False):
+    """Fit the way the worker does.
+
+    ``with_evidence`` gathers the out-of-sample evidence the worker gathers before the main
+    fit. It costs a second fit, so it is opt-in — but without it a model can never reach
+    ``usable_for_decisions``, by design: the top rung requires having been tried on data the
+    model did not see. Any test about response curves or budget advice must therefore go
+    through this path, exactly as production does.
+    """
     warnings.filterwarnings("ignore")
-    summary, idata = fit_model(data, config, **SAMPLE)
+    holdout = placebo = None
+    sample = SAMPLE
+    if with_evidence:
+        from mmm_core.evaluation import holdout_mape, placebo_contribution_share
+
+        sample = DECISION_SAMPLE
+        evidence_sample = {**SAMPLE, "draws": 300, "tune": 300}
+        holdout = holdout_mape(data, config, sample_kwargs=evidence_sample)
+        placebo = placebo_contribution_share(data, config, sample_kwargs=evidence_sample)
+    summary, idata = fit_model(
+        data, config, holdout_mape=holdout, placebo_share=placebo, **sample
+    )
     built = build_model(data, config)  # cheap: builds the graph, no sampling
     return summary, built, idata
 
@@ -213,7 +239,7 @@ def unsaturated_fit():
         ),
         seasonality=SeasonalityBelief.MILD,
     )
-    return (ds, *_fit(ds.data, config))
+    return (ds, *_fit(ds.data, config, with_evidence=True))
 
 
 @pytest.mark.slow
@@ -467,7 +493,7 @@ def test_grp_channel_is_excluded_from_budget_reallocation():
         ),
         seasonality=SeasonalityBelief.MILD,
     )
-    summary, _, _ = _fit(ds.data, config)
+    summary, _, _ = _fit(ds.data, config, with_evidence=True)
 
     alloc = summary.optimal_allocation
     assert alloc is not None
