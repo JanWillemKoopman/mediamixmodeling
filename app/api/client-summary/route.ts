@@ -3,7 +3,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildClientSummaryRequest } from "@/lib/anthropic/clientSummary";
-import { isHierSummary } from "@/lib/types";
 import type { ClientSummary, FitSummary } from "@/lib/types";
 import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
@@ -31,17 +30,39 @@ async function handlePost(request: Request) {
   }
 
   const supabase = createClient();
-  let runQuery = supabase.schema("mmm").from("model_runs").select("id, summary").eq("project_id", projectId);
-  runQuery = modelRunId ? runQuery.eq("id", modelRunId) : runQuery.order("created_at", { ascending: false }).limit(1);
+  let runQuery = supabase
+    .schema("mmm")
+    .from("model_results")
+    .select("model_run_id, summary")
+    .eq("project_id", projectId);
+  runQuery = modelRunId
+    ? runQuery.eq("model_run_id", modelRunId)
+    : runQuery.order("created_at", { ascending: false }).limit(1);
   const { data: run } = await runQuery.maybeSingle();
 
   if (!run) {
-    return NextResponse.json({ error: "Geen fit-resultaat gevonden voor dit project." }, { status: 404 });
+    return NextResponse.json({ error: "Geen resultaat gevonden voor dit project." }, { status: 404 });
   }
-  if (isHierSummary(run.summary)) {
+
+  // A client-facing summary is a stronger claim than a screen full of numbers: it is written
+  // to be forwarded, quoted and acted on. So it is gated on the verdict rather than produced
+  // for anything that finished computing — which is what v1 did.
+  const { data: validation } = await supabase
+    .schema("mmm")
+    .from("model_validations")
+    .select("level, blocking_reasons")
+    .eq("model_run_id", run.model_run_id as string)
+    .maybeSingle();
+  const level = validation?.level as string | undefined;
+  if (level !== "statistically_valid" && level !== "usable_for_decisions") {
     return NextResponse.json(
-      { error: "Klantsamenvatting wordt (nog) niet ondersteund voor hiërarchische runs." },
-      { status: 400 },
+      {
+        error:
+          "Deze berekening haalt de kwaliteitsdrempel niet, dus er wordt geen klantsamenvatting " +
+          "van geschreven. " +
+          ((validation?.blocking_reasons as string[] | null)?.[0] ?? ""),
+      },
+      { status: 409 },
     );
   }
 
@@ -67,9 +88,9 @@ async function handlePost(request: Request) {
 
   const { error: updateErr } = await supabase
     .schema("mmm")
-    .from("model_runs")
+    .from("model_results")
     .update({ client_summary: clientSummary })
-    .eq("id", run.id);
+    .eq("model_run_id", run.model_run_id);
   if (updateErr) {
     return NextResponse.json({ error: updateErr.message }, { status: 400 });
   }

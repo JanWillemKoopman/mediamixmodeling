@@ -7,7 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 // Renders the builder-facing MMM handleiding (lib/handleiding.ts reads it server-side from
-// MMM_HANDLEIDING_DATA_ANALIST.md) in-app, so a data-analist doesn't need to leave the
+// docs/HANDLEIDING.md) in-app, so a data-analist doesn't need to leave the
 // wizard to look up how a step or AI-feature works. No typography plugin installed, so
 // every markdown element gets an explicit dark-theme mapping instead of a `prose` class.
 const MARKDOWN_COMPONENTS = {

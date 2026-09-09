@@ -2,7 +2,6 @@ import { notFound, redirect } from "next/navigation";
 import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { AnalysisView } from "@/components/AnalysisView";
-import { HierarchicalSummaryView } from "@/components/HierarchicalSummaryView";
 import { PageHeader, TopBar } from "@/components/ui";
 import { SummaryView } from "@/components/SummaryView";
 import { ScenarioPlanner } from "@/components/ScenarioPlanner";
@@ -10,9 +9,8 @@ import { DashboardTabs } from "@/components/DashboardTabs";
 import { ClientSummaryCard } from "@/components/ClientSummaryCard";
 import { DashboardHelp } from "@/components/DashboardHelp";
 import { PrintButton } from "@/components/PrintButton";
-import { isHierSummary, type JobConfig, type ModelRun, type Project } from "@/lib/types";
+import { allows, type ModelResult, type ModelValidation, type Project } from "@/lib/types";
 
-// "Laatst bijgewerkt" in leesbare NL-datum voor het versheidsstempel.
 function fmtDate(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);
@@ -22,8 +20,14 @@ function fmtDate(iso: string | null): string | null {
 
 export const dynamic = "force-dynamic";
 
-// The client-facing dashboard: only published results of a project the viewer was granted.
-// RLS guarantees this even if the id is guessed — a non-permitted project returns nothing.
+// The client-facing dashboard: only the published result of a project the viewer was granted.
+// Row-level security guarantees that even if the id is guessed.
+//
+// The verdict comes with the result and is rendered above it. In v1 the client saw the
+// numbers and a budget recommendation with no indication of how much to trust either — and
+// nothing stopped a run that had failed its own quality gate from being published in the
+// first place. Both ends of that are now closed: `mmm.publish_run()` refuses a run below the
+// bar, and what does get published carries its verdict onto this page.
 export default async function ClientDashboard({ params }: { params: { projectId: string } }) {
   const viewer = await getViewer();
   if (!viewer) redirect("/login");
@@ -36,32 +40,34 @@ export default async function ClientDashboard({ params }: { params: { projectId:
     .eq("id", params.projectId)
     .maybeSingle();
   if (!project) notFound();
-  const p = project as Project;
+  const p = project as unknown as Project;
 
-  const { data: runs } = await supabase
+  const { data: results } = await supabase
     .schema("mmm")
-    .from("model_runs")
+    .from("model_results")
     .select("*")
     .eq("project_id", p.id)
     .eq("is_published", true)
     .order("published_at", { ascending: false })
     .limit(1);
-  const latest = (runs ?? [])[0] as ModelRun | undefined;
+  const latest = ((results ?? []) as unknown as ModelResult[])[0];
 
-  // Telling-KPI (orders/leads) vs. continue KPI (omzet) voor de marge-woordkeuze in het
-  // dashboard ("per verkochte eenheid" vs. "per euro omzet") — uit de config waarmee
-  // deze run is gefit; onbekend (geen job_id, of oudere run) = neutrale tekst.
-  let isCountKpi: boolean | undefined;
-  if (latest?.job_id) {
-    const { data: job } = await supabase
+  let validation: ModelValidation | null = null;
+  if (latest) {
+    const { data } = await supabase
       .schema("mmm")
-      .from("jobs")
-      .select("config")
-      .eq("id", latest.job_id)
+      .from("model_validations")
+      .select("*")
+      .eq("model_run_id", latest.model_run_id)
       .maybeSingle();
-    const likelihood = (job?.config as JobConfig | undefined)?.model?.likelihood;
-    if (likelihood) isCountKpi = likelihood === "poisson" || likelihood === "negative_binomial";
+    validation = (data as unknown as ModelValidation) ?? null;
   }
+
+  const summary = latest?.summary ?? null;
+  const canPlan =
+    summary != null &&
+    allows(validation, "budget_advice") &&
+    (summary.response_curves?.length ?? 0) > 0;
 
   return (
     <>
@@ -72,50 +78,29 @@ export default async function ClientDashboard({ params }: { params: { projectId:
           subtitle={p.client_company ?? "Media mix model — resultaten"}
           action={latest ? <PrintButton /> : undefined}
         />
-        {latest && (
-          // Versheidsstempel: waar de cijfers op gebaseerd zijn en wanneer ze zijn bijgewerkt —
-          // een basaal vertrouwenssignaal bij besluiten met grote budgetten.
+        {summary && (
           <p className="-mt-3 text-xs text-fg-faint">
-            {isHierSummary(latest.summary)
-              ? `Datavenster ${latest.summary.n_weeks} weken`
-              : `Datavenster ${latest.summary.window[0]} t/m ${latest.summary.window[1]} (${latest.summary.n_weeks} weken)`}
-            {fmtDate(latest.published_at) && ` · Laatst bijgewerkt ${fmtDate(latest.published_at)}`}
+            Datavenster {summary.window[0]} t/m {summary.window[1]} ({summary.n_weeks} weken)
+            {summary.weekly?.burn_in_weeks
+              ? `; de eerste ${summary.weekly.burn_in_weeks} weken bouwden alleen de na-ijl op`
+              : ""}
+            {fmtDate(latest?.published_at ?? null) && ` · Laatst bijgewerkt ${fmtDate(latest!.published_at)}`}
           </p>
         )}
-        {latest ? (
-          isHierSummary(latest.summary) ? (
-            // Hiërarchische run: geen responscurves, dus geen scenario-tabblad.
-            <DashboardTabs
-              results={
-                <>
-                  {latest.client_summary && <ClientSummaryCard summary={latest.client_summary} />}
-                  <DashboardHelp />
-                  <HierarchicalSummaryView summary={latest.summary} />
-                </>
-              }
-              scenario={null}
-            />
-          ) : (
-            <DashboardTabs
-              results={
-                <>
-                  {latest.client_summary && <ClientSummaryCard summary={latest.client_summary} />}
-                  <DashboardHelp />
-                  <SummaryView summary={latest.summary} kpiMargin={p.kpi_margin ?? null} isCountKpi={isCountKpi} />
-                  {latest.analysis && <AnalysisView analysis={latest.analysis} />}
-                </>
-              }
-              scenario={
-                latest.summary.response_curves && latest.summary.response_curves.length > 0 ? (
-                  <ScenarioPlanner summary={latest.summary} kpiMargin={p.kpi_margin ?? null} />
-                ) : null
-              }
-            />
-          )
+        {latest && summary ? (
+          <DashboardTabs
+            results={
+              <>
+                {latest.client_summary && <ClientSummaryCard summary={latest.client_summary} />}
+                <DashboardHelp />
+                <SummaryView summary={summary} validation={validation} kpiMargin={p.kpi_margin ?? null} />
+                {latest.analysis && <AnalysisView analysis={latest.analysis} />}
+              </>
+            }
+            scenario={canPlan ? <ScenarioPlanner summary={summary} kpiMargin={p.kpi_margin ?? null} /> : null}
+          />
         ) : (
-          <p className="text-sm text-fg-muted">
-            Er is nog geen gepubliceerd resultaat voor dit project.
-          </p>
+          <p className="text-sm text-fg-muted">Er is nog geen gepubliceerd resultaat voor dit project.</p>
         )}
         <p className="text-xs text-fg-faint">
           Elke waarde toont de mediaan met een 94%-betrouwbaarheidsinterval. Brede marges bij

@@ -23,6 +23,7 @@ from tests.fakes import (
     StubSummary,
     make_stub_evidence,
     make_stub_fit,
+    make_stub_resolver,
     no_prior_gate,
 )
 
@@ -45,6 +46,20 @@ def _spec():
     )
 
 
+def _intent():
+    from mmm_core.model import ChannelIntent, ChannelUnit, KpiType, ModelIntent
+
+    from mmm_worker.jobspec import serialize_intent
+
+    return serialize_intent(
+        ModelIntent(
+            kpi="revenue",
+            kpi_type=KpiType.REVENUE,
+            channels=(ChannelIntent("search", ChannelUnit.CURRENCY),),
+        )
+    )
+
+
 def _store(**run_overrides):
     run = {
         "id": "run-1",
@@ -58,7 +73,7 @@ def _store(**run_overrides):
     }
     return FakeRunStore(
         run=run,
-        configuration={"id": "cfg-1", "resolved_spec": _spec(), "spec_sha256": "spec-hash"},
+        configuration={"id": "cfg-1", "intent": _intent(), "resolved_spec": None},
         dataset={
             "id": "ds-1",
             "status": "ready",
@@ -76,6 +91,7 @@ def _run(store, storage=None, **kw):
     kw.setdefault("fit_fn", make_stub_fit())
     kw.setdefault("evidence_fn", make_stub_evidence())
     kw.setdefault("prior_gate_fn", no_prior_gate)
+    kw.setdefault("resolve_fn", make_stub_resolver())
     return run_model_run(store, storage or _storage(), "run-1", **kw)
 
 
@@ -103,7 +119,7 @@ def test_everything_needed_to_reproduce_the_run_is_recorded():
     _run(store)
     p = store.completed
     assert p["dataset_sha256"] == "data-hash"
-    assert p["spec_sha256"] == "spec-hash"
+    assert p["spec_sha256"] == "derived-hash"
     assert p["seed"] == 7
     assert p["sample_params"]["draws"] == 500
     assert "mmm_core" in p["package_versions"]
@@ -156,11 +172,12 @@ def test_a_run_that_is_not_queued_is_never_claimed():
 
 
 def test_priors_that_exclude_the_observed_kpi_stop_the_run_before_sampling():
-    from mmm_worker.jobspec import SpecError
+    from mmm_worker.runner import _PriorGateFailed
 
     def refusing_gate(data, config):
-        raise SpecError(
-            "de aannames sluiten je eigen cijfers uit: ze impliceren een KPI tussen 1 en 2"
+        raise _PriorGateFailed(
+            "de aannames sluiten je eigen cijfers uit: ze impliceren een KPI tussen 1 en 2",
+            {"admits_observed": False, "ok": False},
         )
 
     store = _store()
@@ -173,6 +190,10 @@ def test_priors_that_exclude_the_observed_kpi_stop_the_run_before_sampling():
     # The user is sent to the tuning step, and told what the mismatch was.
     assert "afstemming" in store.failure["user_message"]
     assert "impliceren een KPI" in store.failure["user_message"]
+    # The review is stored even on the failing path, so the user can see the mismatch.
+    assert store.prior_gate == {
+        "review": {"admits_observed": False, "ok": False}, "passed": False
+    }
 
 
 # --- evidence gathering ----------------------------------------------------------------
@@ -278,6 +299,37 @@ def test_a_corrupt_specification_fails_permanently():
     result = _run(store)
     assert result["code"] == ErrorCode.CONFIG_INVALID
     assert store.failure["retryable"] is False
+
+
+# --- prior derivation happens here, once ---------------------------------------------
+
+
+def test_the_specification_is_derived_from_intent_and_stored_with_its_provenance():
+    """The app stores what the user meant; the worker computes what it means for this data."""
+    store = _store()
+    _run(store)
+    assert store.resolved is not None
+    assert store.configuration["spec_sha256"] == "derived-hash"
+
+
+def test_an_already_resolved_configuration_is_reused_verbatim():
+    """A re-run must be the same run, not a fresh derivation that happens to look similar."""
+    store = _store()
+    store.configuration["resolved_spec"] = _spec()
+    store.configuration["spec_sha256"] = "earlier-hash"
+    resolver = make_stub_resolver()
+    _run(store, resolve_fn=resolver)
+    assert resolver.calls == [], "the stored specification was re-derived instead of reused"
+    assert store.completed["spec_sha256"] == "earlier-hash"
+
+
+def test_the_prior_review_is_stored_whether_it_passes_or_fails():
+    store = _store()
+    _run(store)
+    assert store.prior_gate == {
+        "review": {"admits_observed": True, "not_absurdly_wide": True, "ok": True},
+        "passed": True,
+    }
 
 
 # --- cancellation -------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 import { ResultsCharts } from "@/components/ResultsCharts";
 import { MMM_GLOSSARY, Term } from "@/components/ui";
 import { useWizardChatOptional } from "@/components/WizardChatContext";
+import { VALIDATION_LEVEL_LABEL, allows } from "@/lib/types";
 import {
   CONFIDENCE_LABEL,
   confidenceFromInterval,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/dashboardInsights";
 import type {
   FitSummary,
+  ModelValidation,
   FrontierPoint,
   Interval,
   OptimalAllocation,
@@ -26,7 +28,10 @@ function fmt(n: number, digits = 0): string {
   return n.toLocaleString("nl-NL", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
 
-function pct(n: number): string {
+function pct(n: number | null | undefined): string {
+  // Not every figure exists for every model: a KPI with zero weeks has no percentage error,
+  // and inventing one is worse than saying so.
+  if (n == null || Number.isNaN(n)) return "—";
   return (n * 100).toLocaleString("nl-NL", { maximumFractionDigits: 1 }) + "%";
 }
 
@@ -48,15 +53,14 @@ function IntervalCell({ value, render }: { value: Interval; render: (n: number) 
 function Headline({
   summary,
   kpiMargin,
-  isCountKpi,
 }: {
   summary: FitSummary;
   kpiMargin?: number | null;
-  isCountKpi?: boolean;
 }) {
   // null op het klant-dashboard — de klant kan de marge niet zelf invullen, dus de tip
   // hieronder is alleen zinvol (en zichtbaar) voor de bouwer.
   const chat = useWizardChatOptional();
+  const isCountKpi = summary.kpi_type !== "revenue";
   const m = moneyKpis(summary, kpiMargin);
   const roasWord = isCountKpi === false ? "omzet per bestede euro" : `${summary.kpi} per bestede euro`;
   return (
@@ -165,6 +169,57 @@ function TrustLayer({
 // waar deze laag-voor-laag weergave sowieso alleen achter "Details" verschijnt (zie
 // TrustBadge hieronder) — de klant heeft niets aan sampler-jargon of een terug-knop naar een
 // wizardstap die hij niet kan openen.
+// The verdict, above the numbers. Order is the message: a reader who sees the channel table
+// first will read it as findings, whatever a badge further down says. v1 put a quality badge
+// somewhere below the results and gated nothing on it.
+function Verdict({ validation }: { validation: ModelValidation | null }) {
+  if (!validation) return null;
+  const tone =
+    validation.level === "usable_for_decisions"
+      ? "border-success/30 bg-success-dim text-success"
+      : validation.level === "statistically_valid"
+        ? "border-warn/30 bg-warn-dim text-warn"
+        : "border-danger/30 bg-danger-dim text-danger";
+  const unusable = validation.per_channel.filter((c) => !c.usable);
+  return (
+    <div className={`rounded-lg border p-4 ${tone}`}>
+      <p className="font-semibold">{VALIDATION_LEVEL_LABEL[validation.level]}</p>
+      {validation.blocking_reasons.length > 0 && (
+        <ul className="mt-2 space-y-1 text-sm">
+          {validation.blocking_reasons.map((r, i) => (
+            <li key={i}>• {r}</li>
+          ))}
+        </ul>
+      )}
+      {validation.warning_reasons.length > 0 && (
+        <ul className="mt-2 space-y-1 text-sm opacity-90">
+          {validation.warning_reasons.map((r, i) => (
+            <li key={i}>• {r}</li>
+          ))}
+        </ul>
+      )}
+      {unusable.length > 0 && (
+        <div className="mt-3 text-sm">
+          <p className="font-medium">Voor deze kanalen staat hieronder geen apart cijfer:</p>
+          <ul className="mt-1 space-y-1">
+            {unusable.map((c) => (
+              <li key={c.name}>
+                • <strong>{c.name}</strong> — {c.reasons.join("; ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {!allows(validation, "budget_advice") && (
+        <p className="mt-3 text-sm opacity-90">
+          Er staat geen budgetadvies bij dit resultaat: daarvoor moet vaststaan dat het model
+          ook klopt op weken die het niet heeft gezien.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TrustLayers({ summary }: { summary: FitSummary }) {
   const { sampler, fit } = layeredTrustVerdict(summary);
   const d = summary.diagnostics;
@@ -293,6 +348,10 @@ const ACTION_ICON: Record<RecommendedAction["kind"], string> = {
 // de frontier en de ROAS-verdeling — met per advies een vertrouwenslabel. Dit is wat het
 // dashboard van "mooie grafieken" naar "besluitvormingsinstrument" tilt.
 function ActionsBlock({ summary, kpiMargin }: { summary: FitSummary; kpiMargin?: number | null }) {
+  // No budget advice unless the model earned it. In v1 this block rendered for any run that
+  // finished computing, so a model that failed its own quality gate still told the reader to
+  // move money between channels.
+  if (!allows(summary.validation ?? null, "budget_advice")) return null;
   const actions = recommendedActions(summary, kpiMargin);
   if (actions.length === 0) return null;
   return (
@@ -438,22 +497,23 @@ function BudgetAdvice({
 export function SummaryView({
   summary,
   kpiMargin,
-  isCountKpi,
+  validation,
 }: {
   summary: FitSummary;
+  validation?: ModelValidation | null;
   kpiMargin?: number | null;
   // Telling-KPI (orders/leads) vs. continue KPI (omzet) — bepaalt de marge-woordkeuze
   // in de grafieken ("per verkochte eenheid" vs. "per euro omzet"). Onbekend = neutraal.
-  isCountKpi?: boolean;
 }) {
   return (
     <div className="space-y-6">
       {/* Hero: conclusie → vertrouwen → actie (business vóór statistiek). */}
-      <Headline summary={summary} kpiMargin={kpiMargin} isCountKpi={isCountKpi} />
+      <Verdict validation={validation ?? summary.validation ?? null} />
+      <Headline summary={summary} kpiMargin={kpiMargin} />
       <TrustBadge summary={summary} />
       <ActionsBlock summary={summary} kpiMargin={kpiMargin} />
 
-      <ResultsCharts summary={summary} kpiMargin={kpiMargin} isCountKpi={isCountKpi} />
+      <ResultsCharts summary={summary} kpiMargin={kpiMargin} isCountKpi={summary.kpi_type !== "revenue"} />
 
       <details className="border-t border-border pt-4">
         <summary className="cursor-pointer select-none text-sm font-medium text-fg">
@@ -496,7 +556,11 @@ export function SummaryView({
                     <IntervalCell value={ch.contribution_share} render={pct} />
                   </td>
                   <td className="py-3 pr-4">
-                    <IntervalCell value={ch.roas} render={(n) => fmt(n, 2)} />
+                    {ch.roas ? (
+                      <IntervalCell value={ch.roas} render={(n) => fmt(n, 2)} />
+                    ) : (
+                      <span className="text-fg-faint">geen uitgaven</span>
+                    )}
                   </td>
                   <td className="py-3 pr-4">
                     <IntervalCell value={ch.adstock_half_life_weeks} render={(n) => fmt(n, 1) + " wk"} />
@@ -508,7 +572,9 @@ export function SummaryView({
                     {ch.direct_share ? <IntervalCell value={ch.direct_share} render={pct} /> : <span className="text-fg-faint">—</span>}
                   </td>
                   <td className={`py-3 pr-4 ${last ? "rounded-br-2xl" : ""}`}>
-                    <ConfidencePill confidence={confidenceFromInterval(ch.roas)} />
+                    <ConfidencePill
+                      confidence={ch.roas ? confidenceFromInterval(ch.roas) : "laag"}
+                    />
                   </td>
                 </tr>
               );

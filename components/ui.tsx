@@ -2,7 +2,7 @@ import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { humanizeError } from "@/lib/humanizeMessage";
 import { GuideModal } from "@/components/GuideModal";
-import type { JobStatus, ProjectStatus } from "@/lib/types";
+import type { ProjectStatus, RunState } from "@/lib/types";
 
 // Kaart met de afgeronde hoeken van de Udenhout-huisstijl (1rem via rounded-2xl),
 // onderscheiden van het canvas door zijn tint.
@@ -92,30 +92,40 @@ export function PageHeader({
   );
 }
 
-const STATUS_LABEL: Record<JobStatus | ProjectStatus, string> = {
+const STATUS_LABEL: Record<RunState | ProjectStatus, string> = {
   draft: "Concept",
   published: "Gepubliceerd",
   archived: "Gearchiveerd",
   queued: "In wachtrij",
-  running: "Bezig",
-  succeeded: "Klaar",
+  validating: "Instellingen controleren",
+  preparing_data: "Data klaarzetten",
+  building_model: "Aannames toetsen",
+  validating_model: "Betrouwbaarheid toetsen",
+  sampling: "Berekenen",
+  calculating_results: "Resultaten samenstellen",
+  completed: "Klaar",
   failed: "Mislukt",
-  cancelled: "Geannuleerd",
+  cancelled: "Gestopt",
 };
 
 // Groen = goed/klaar, rood = mislukt/aandacht, amber = bezig, neutraal = rest.
-const STATUS_TONE: Record<JobStatus | ProjectStatus, string> = {
+const STATUS_TONE: Record<RunState | ProjectStatus, string> = {
   draft: "border border-border bg-surface-2 text-fg-muted",
   published: "border border-success/30 bg-success-dim text-success",
   archived: "border border-border bg-surface-2 text-fg-faint",
-  queued: "border border-border bg-surface-2 text-fg-muted",
-  running: "border border-warn/30 bg-warn-dim text-warn",
-  succeeded: "border border-success/30 bg-success-dim text-success",
+  completed: "border border-success/30 bg-success-dim text-success",
   failed: "border border-danger/30 bg-danger-dim text-danger",
-  cancelled: "border border-border bg-surface-2 text-fg-faint",
+  cancelled: "border border-border bg-surface-2 text-fg-muted",
+  queued: "border border-border bg-surface-2 text-fg-muted",
+  validating: "border border-warn/30 bg-warn-dim text-warn",
+  preparing_data: "border border-warn/30 bg-warn-dim text-warn",
+  building_model: "border border-warn/30 bg-warn-dim text-warn",
+  validating_model: "border border-warn/30 bg-warn-dim text-warn",
+  sampling: "border border-warn/30 bg-warn-dim text-warn",
+  calculating_results: "border border-warn/30 bg-warn-dim text-warn",
 };
 
-export function StatusBadge({ status }: { status: JobStatus | ProjectStatus }) {
+export function StatusBadge({ status }: { status: RunState | ProjectStatus }) {
   return (
     <span
       className={`inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium ${STATUS_TONE[status]}`}

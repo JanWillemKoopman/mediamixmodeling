@@ -30,7 +30,8 @@
 // opnieuw te bekijken/aan te passen — een nieuw recept of een nieuwe configuratie maakt
 // gewoon een nieuwe dataset-/run-versie aan, de bestaande historie blijft intact.
 
-import type { Dataset, Job, ModelRun, SourceFile } from "@/lib/types";
+import { isRunning } from "@/lib/types";
+import type { DatasetVersion, ModelConfiguration, RunView, SourceFile } from "@/lib/types";
 
 export type WizardPhase =
   | "upload" // nog geen bronbestand
@@ -48,9 +49,9 @@ export type WizardPhase =
 
 export interface WizardData {
   sources: SourceFile[];
-  dataset: Dataset | null;
-  jobs: Job[];
-  runs: ModelRun[];
+  dataset: DatasetVersion | null;
+  configuration: ModelConfiguration | null;
+  runs: RunView[];
   // Is er al zakelijke context vastgelegd (branche/omschrijving/marge/feiten)? Bepaalt of
   // de expliciete context-fase nog getoond wordt vóór het tunen.
   contextProvided?: boolean;
@@ -58,60 +59,51 @@ export interface WizardData {
   skipContext?: boolean;
 }
 
-const FIT_TYPES = ["fit", "fit_hierarchical"] as const;
-
-export function derivePhase({ sources, dataset, jobs, runs, contextProvided, skipContext }: WizardData): WizardPhase {
+export function derivePhase({
+  sources,
+  dataset,
+  runs,
+  contextProvided,
+  skipContext,
+}: WizardData): WizardPhase {
   if (sources.length === 0) return "upload";
 
-  // Eén bron ondersteund per project (zie SourceUpload/UploadCard) — kolomherkenning moet
-  // expliciet bevestigd zijn vóórdat er iets wordt samengevoegd.
+  // Eén bron ondersteund per project — kolomherkenning moet expliciet bevestigd zijn
+  // vóórdat er iets wordt samengevoegd.
   const source = sources[0];
   if (!source.inspection_confirmed_at) return "inspect";
 
-  const fitJobs = jobs.filter((j) => (FIT_TYPES as readonly string[]).includes(j.type));
-  const latestFit = fitJobs[0] ?? null; // jobs komen binnen als "newest first"
-  const latestRun = runs[0] ?? null;
+  const latest = runs[0] ?? null;
+  const finishedRun = runs.find((r) => r.run.state === "completed") ?? null;
 
-  // Als er al een geslaagde run is, zijn we voorbij het fit-stadium: valideren/publiceren.
-  if (latestRun) {
-    if (latestRun.is_published) return "published";
-    // Loopt er ná de laatste run alweer een nieuwe fit? Dan zit de gebruiker in "fitting".
-    if (latestFit && (latestFit.status === "queued" || latestFit.status === "running")) {
-      return "fitting";
-    }
+  // Is er al een afgeronde berekening, dan zijn we voorbij het rekenstadium.
+  if (finishedRun) {
+    if (finishedRun.result?.is_published) return "published";
+    // Loopt er ná die run alweer een nieuwe? Dan zit de gebruiker in "fitting".
+    if (latest && isRunning(latest.run)) return "fitting";
     return "review";
   }
 
-  // Nog geen run. Beoordeel het fit-stadium op basis van de laatste fit-job.
-  if (latestFit) {
-    if (latestFit.status === "failed" || latestFit.status === "cancelled") return "fit_failed";
-    if (latestFit.status === "queued" || latestFit.status === "running") return "fitting";
-    // succeeded zonder run-rij: worker is nog aan het wegschrijven — behandel als fitting.
-    return "fitting";
+  if (latest) {
+    if (isRunning(latest.run)) return "fitting";
+    if (latest.run.state === "failed" || latest.run.state === "cancelled") return "fit_failed";
   }
 
-  // Nog geen fit gestart. Waar staat de dataset?
+  // Nog geen berekening. Waar staat de dataset?
   if (dataset) {
-    if (dataset.status === "approved") {
+    if (dataset.approved_at) {
       // Vóór het tunen: één keer om de zakelijke context vragen (branche, omschrijving,
-      // marge) — de belangrijkste input voor priors. Overslaanbaar.
+      // marge) — de belangrijkste input voor de aannames. Overslaanbaar.
       if (!contextProvided && !skipContext) return "context";
-      // Tuning bevestigen start in één klik meteen de berekening (zie TuningCard), dus
-      // zodra er een fit-job bestaat is dat hierboven al afgevangen (latestFit). Is er nog
-      // geen fit-job, dan is "tuning" de juiste kaart — ook als een eerdere bevestiging
-      // wél lukte maar het starten van de berekening daarna faalde (retry op dezelfde kaart).
       return "tuning";
     }
-    if (dataset.status === "prepared") return "prepare_review";
-    if (dataset.status === "preparing") return "prepare_running";
+    if (dataset.status === "ready") return "prepare_review";
+    if (dataset.status === "queued" || dataset.status === "building") return "prepare_running";
     if (dataset.status === "failed") return "prepare_failed";
-    // draft: recept nog niet ingediend.
   }
   return "prepare_recipe";
 }
 
-// True zolang we op een asynchrone worker (Modal) wachten — de client pollt dan zachtjes
-// door zodat de fase vanzelf doorschuift zodra Realtime/DB de nieuwe status toont.
 export function isWaitingPhase(phase: WizardPhase): boolean {
   return phase === "prepare_running" || phase === "fitting";
 }

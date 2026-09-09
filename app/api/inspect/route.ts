@@ -4,7 +4,7 @@ import Anthropic, { toFile } from "@anthropic-ai/sdk";
 import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildInspectionRequest, parseInspectionResult, INSPECTION_MODEL } from "@/lib/anthropic/dataInspection";
-import type { Dataset, DataInspection, SourceFile } from "@/lib/types";
+import type { DatasetVersion, DataInspection, SourceFile } from "@/lib/types";
 import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
 // Deep data inspection: hand the raw uploads (or the approved master) to Claude in the
@@ -58,14 +58,14 @@ async function handlePost(request: Request) {
   if (scope === "master") {
     const { data: ds } = await supabase
       .schema("mmm")
-      .from("datasets")
+      .from("dataset_versions")
       .select("*")
       .eq("project_id", projectId)
-      .in("status", ["prepared", "approved"])
+      .eq("status", "ready")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    const dataset = ds as Dataset | null;
+    const dataset = ds as DatasetVersion | null;
     if (!dataset?.master_path) {
       return NextResponse.json({ error: "Geen samengevoegde master-tabel gevonden." }, { status: 404 });
     }
@@ -105,7 +105,7 @@ async function handlePost(request: Request) {
     .from("data_inspections")
     .insert({
       project_id: projectId,
-      dataset_id: datasetId,
+      dataset_version_id: datasetId,
       scope,
       status: "running",
       model: INSPECTION_MODEL,

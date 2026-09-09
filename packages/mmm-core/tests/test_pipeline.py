@@ -9,7 +9,6 @@ from mmm_core import (
     Severity,
     SourceSpec,
     build_master_dataset,
-    build_master_datasets_by_region,
 )
 from synthetic import daily_frame, three_source_scenario
 
@@ -295,80 +294,3 @@ def test_control_gap_filled_when_strategy_set():
 def test_fill_on_non_control_column_rejected_by_spec():
     with pytest.raises(ValueError):
         ColumnSpec("spend", Role.SPEND, fill="zero")
-
-
-# --- multi-region (hierarchical) builds -------------------------------------------
-
-def _region_sources(start, periods, revenue_value, spend_value):
-    rev = daily_frame(start, periods, revenue_value, date_col="date", value_col="revenue")
-    spend = daily_frame(start, periods, spend_value, date_col="date", value_col="spend")
-    return [
-        (_spec("rev", "revenue", Role.KPI, "date"), rev),
-        (_spec("g", "spend", Role.SPEND, "date"), spend),
-    ]
-
-
-def test_regions_are_aligned_to_the_shared_window():
-    # NL: 12 weeks starting 2022-01-03. BE: 10 weeks starting 2022-01-17 (2 weeks later)
-    # and ending 2 weeks earlier -> the shared window is BE's own window exactly.
-    region_frames, report = build_master_datasets_by_region({
-        "NL": _region_sources("2022-01-03", 84, 1000.0, 50.0),
-        "BE": _region_sources("2022-01-17", 70, 800.0, 40.0),
-    })
-    assert not report.has_errors
-    assert set(region_frames) == {"NL", "BE"}
-    assert region_frames["NL"].index.equals(region_frames["BE"].index)
-    assert len(region_frames["NL"]) == 10
-    # NL's own window was cut down to fit BE's shorter one -> reported, not silent.
-    assert "region_window_trimmed" in report.codes()
-
-
-def test_regions_need_at_least_two():
-    with pytest.raises(ValueError):
-        build_master_datasets_by_region({"NL": _region_sources("2022-01-03", 84, 1000.0, 50.0)})
-
-
-def test_non_overlapping_regions_report_error_and_empty_frames():
-    region_frames, report = build_master_datasets_by_region({
-        "NL": _region_sources("2022-01-03", 84, 1000.0, 50.0),
-        "BE": _region_sources("2022-07-04", 84, 800.0, 40.0),
-    })
-    assert region_frames == {}
-    assert report.has_errors
-    assert "no_region_overlap" in report.codes()
-
-
-def test_region_with_no_window_reports_error_and_empty_frames():
-    # BE's spend and revenue never overlap in time on their own -> BE has no window at all.
-    region_frames, report = build_master_datasets_by_region({
-        "NL": _region_sources("2022-01-03", 84, 1000.0, 50.0),
-        "BE": [
-            (_spec("rev", "revenue", Role.KPI, "date"), daily_frame("2022-01-03", 30, 800.0, date_col="date", value_col="revenue")),
-            (_spec("g", "spend", Role.SPEND, "date"), daily_frame("2022-06-01", 30, 40.0, date_col="date", value_col="spend")),
-        ],
-    })
-    assert region_frames == {}
-    assert report.has_errors
-    assert "region_no_window" in report.codes()
-
-
-def test_per_region_issues_are_retagged_with_region_name():
-    # A near-identical-channel warning raised inside one region's own build should surface
-    # in the combined report, prefixed with that region so it isn't ambiguous which
-    # region it came from.
-    nl_rev = daily_frame("2022-01-03", 84, 1000.0, date_col="date", value_col="revenue")
-    nl_spend_a = daily_frame("2022-01-03", 84, np.linspace(10, 90, 84), date_col="date", value_col="a")
-    nl_spend_b = daily_frame("2022-01-03", 84, np.linspace(10, 90, 84), date_col="date", value_col="b")
-    region_frames, report = build_master_datasets_by_region({
-        "NL": [
-            (_spec("rev", "revenue", Role.KPI, "date"), nl_rev),
-            (_spec("a", "a", Role.SPEND, "date"), nl_spend_a),
-            (_spec("b", "b", Role.SPEND, "date"), nl_spend_b),
-        ],
-        "BE": _region_sources("2022-01-03", 84, 800.0, 40.0),
-    })
-    assert not report.has_errors
-    near_identical = [i for i in report if i.code == "near_identical_channels"]
-    assert len(near_identical) == 1
-    assert near_identical[0].source == "NL"
-    assert "[NL]" in near_identical[0].message

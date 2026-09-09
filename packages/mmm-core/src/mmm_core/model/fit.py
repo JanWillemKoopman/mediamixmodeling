@@ -200,6 +200,10 @@ class FrontierPoint:
 @dataclass
 class FitSummary:
     kpi: str
+    # What the KPI counts. Carried on the summary so the interface can word the results
+    # correctly ("per verkochte eenheid" vs "per euro omzet") without having to fetch the
+    # configuration separately and risk getting a different one.
+    kpi_type: str
     n_weeks: int
     window: tuple[str, str]
     baseline_contribution: Interval   # KPI explained without marketing
@@ -667,6 +671,7 @@ def summarize_fit(
 
     return FitSummary(
         kpi=config.kpi,
+        kpi_type=config.kpi_type.value,
         n_weeks=len(built.dates) - burn_in,
         window=(str(built.dates[burn_in].date()), str(built.dates.max().date())),
         baseline_contribution=baseline,

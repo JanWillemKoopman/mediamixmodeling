@@ -6,7 +6,7 @@
 import { humanizeError, humanizeQualityMessage } from "@/lib/humanizeMessage";
 import { issueInfo } from "@/lib/qualityIssueRegistry";
 import { formatMenu, matchOption, type MenuOption } from "@/lib/wizard/questions";
-import type { Dataset, QualityIssue } from "@/lib/types";
+import type { DatasetVersion, QualityIssue } from "@/lib/types";
 import type { TurnEnv, TurnReplyResult } from "@/lib/wizard/turns/types";
 
 const REVIEW_OPTIONS: MenuOption[] = [
@@ -14,10 +14,10 @@ const REVIEW_OPTIONS: MenuOption[] = [
   { key: "adjust", label: "Ik wil iets aanpassen", synonyms: ["aanpassen", "wijzigen", "nee"] },
 ];
 
-function formatQualityReport(dataset: Dataset): string {
-  const issues = dataset.quality?.issues ?? [];
+function formatQualityReport(dataset: DatasetVersion): string {
+  const issues = dataset.suitability?.issues ?? [];
   if (issues.length === 0) return "Geen bijzonderheden gevonden.";
-  const byTone = (tone: QualityIssue["severity"]) => issues.filter((i) => i.severity === tone);
+  const byTone = (tone: QualityIssue["severity"]) => issues.filter((i: QualityIssue) => i.severity === tone);
   const lines: string[] = [];
   const section = (label: string, list: QualityIssue[]) => {
     if (list.length === 0) return;
@@ -31,7 +31,7 @@ function formatQualityReport(dataset: Dataset): string {
   section("fout", byTone("error"));
   section("waarschuwing", byTone("warning"));
   const infos = byTone("info");
-  if (infos.length > 0) lines.push(`${infos.length} info-melding${infos.length === 1 ? "" : "en"}: ${infos.map((i) => humanizeQualityMessage(i.message)).join("; ")}.`);
+  if (infos.length > 0) lines.push(`${infos.length} info-melding${infos.length === 1 ? "" : "en"}: ${infos.map((i: QualityIssue) => humanizeQualityMessage(i.message)).join("; ")}.`);
   return lines.join("\n");
 }
 

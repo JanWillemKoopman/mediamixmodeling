@@ -110,26 +110,71 @@ def _gather_evidence(data, config, *, seed: int, log) -> tuple[float | None, flo
     return holdout, placebo
 
 
-def _check_prior_gate(data, config) -> None:
+def _check_prior_gate(data, config) -> dict:
     """Refuse to spend a fit on priors the data could never produce.
 
     The cheapest possible check, and the one v1 computed and then ignored: it stored the
-    result on the job row for a language model to read as prose. Here it blocks.
+    result on the job row for a language model to read as prose. Here it blocks, and the
+    review is returned so it can be stored against the configuration either way.
     """
+    from dataclasses import asdict
+
     from mmm_core.evaluation import prior_predictive_check
 
     result = prior_predictive_check(data, config, draws=300)
+    review = {k: (bool(v) if isinstance(v, bool) else float(v)) for k, v in asdict(result).items()}
     if not result.admits_observed:
-        raise SpecError(
+        raise _PriorGateFailed(
             f"de aannames sluiten je eigen cijfers uit: ze impliceren een KPI tussen "
             f"{result.prior_low:,.0f} en {result.prior_high:,.0f}, terwijl je data tussen "
-            f"{result.observed_low:,.0f} en {result.observed_high:,.0f} ligt"
+            f"{result.observed_low:,.0f} en {result.observed_high:,.0f} ligt",
+            review,
         )
     if not result.not_absurdly_wide:
-        raise SpecError(
+        raise _PriorGateFailed(
             "de aannames zijn zo ruim dat het model vrijwel elke uitkomst plausibel vindt; "
-            "daarmee zegt het resultaat niets"
+            "daarmee zegt het resultaat niets",
+            review,
         )
+    return review
+
+
+def _resolve_specification(configuration: dict, data):
+    """Turn the stated intent into a runnable specification, here and nowhere else.
+
+    The app stores what the user (or the AI) *meant*, in the closed vocabulary of
+    :mod:`mmm_core.model.intent`. Turning that into priors needs measured statistics of the
+    actual dataset — the scale of the KPI, each channel's typical weekly pressure, the
+    seasonal amplitude actually present — so it has to happen where the data is. Doing it
+    in the app would mean a second implementation of the most consequential numbers in the
+    product, in a different language, drifting from this one.
+
+    Returns ``(config, spec, provenance, issues)``.
+    """
+    from mmm_core.model import build_model_config, measure_dataset
+
+    from mmm_worker.jobspec import parse_intent, serialize_model_config, spec_hash
+
+    intent = parse_intent(configuration["intent"])
+    stats = measure_dataset(
+        data,
+        intent.kpi,
+        list(intent.channel_names),
+        list(intent.control_columns),
+    )
+    resolved = build_model_config(intent, stats)
+    issues = [
+        {"code": i.code, "severity": i.severity, "message": i.message, "column": i.column}
+        for i in resolved.issues
+    ]
+    if resolved.has_errors:
+        raise SpecError("; ".join(i.message for i in resolved.errors))
+    spec = serialize_model_config(resolved.config)
+    provenance = [
+        {"parameter": p.parameter, "value": p.value, "derived_from": p.derived_from}
+        for p in resolved.provenance
+    ]
+    return resolved.config, spec, spec_hash(spec), provenance, issues
 
 
 def run_model_run(
@@ -141,6 +186,7 @@ def run_model_run(
     fit_fn=None,
     evidence_fn=_gather_evidence,
     prior_gate_fn=_check_prior_gate,
+    resolve_fn=_resolve_specification,
     netcdf_bytes=_netcdf_bytes,
     artifact_prefix: str = "runs",
 ) -> dict:
@@ -166,9 +212,8 @@ def run_model_run(
     project_id = run["project_id"]
 
     try:
-        # --- VALIDATING: is the specification runnable at all? -------------------
+        # --- VALIDATING: is there a dataset to run against? ----------------------
         configuration = runs.get_configuration(run["model_configuration_id"])
-        config = parse_model_config(configuration["resolved_spec"])
         dataset = runs.get_dataset_version(run["dataset_version_id"])
         if dataset.get("status") != "ready":
             raise SpecError("de dataset is nog niet klaar of is mislukt")
@@ -189,9 +234,33 @@ def run_model_run(
         data = data.sort_index()
         guard_cancel()
 
-        # --- BUILDING_MODEL: the prior gate, before any compute is spent ---------
+        # --- BUILDING_MODEL: derive the priors, then gate them -------------------
         runs.set_state(run_id, RunState.BUILDING_MODEL)
-        prior_gate_fn(data, config)
+        if configuration.get("resolved_spec"):
+            # A re-run of an already-resolved configuration reuses the exact same
+            # specification, so "same configuration, same data, same seed" really is the
+            # same run rather than a fresh derivation that happens to look similar.
+            config = parse_model_config(configuration["resolved_spec"])
+            resolved_hash = configuration.get("spec_sha256")
+        else:
+            config, spec, resolved_hash, provenance, issues = resolve_fn(configuration, data)
+            runs.save_resolved_spec(
+                run["model_configuration_id"],
+                spec=spec,
+                spec_hash=resolved_hash,
+                provenance=provenance,
+                issues=issues,
+            )
+        guard_cancel()
+
+        try:
+            review = prior_gate_fn(data, config)
+        except _PriorGateFailed as exc:
+            runs.record_prior_gate(
+                run["model_configuration_id"], review=exc.review, passed=False
+            )
+            raise
+        runs.record_prior_gate(run["model_configuration_id"], review=review or {}, passed=True)
         guard_cancel()
 
         # --- VALIDATING_MODEL: gather the evidence *before* the main fit ---------
@@ -271,7 +340,7 @@ def run_model_run(
             run_id,
             provenance={
                 "dataset_sha256": dataset.get("master_sha256"),
-                "spec_sha256": configuration.get("spec_sha256"),
+                "spec_sha256": resolved_hash,
                 "seed": seed,
                 "sample_params": sample,
                 "package_versions": _package_versions(),
@@ -311,7 +380,7 @@ def run_model_run(
         # the app can send the user back to the tuning step rather than to the data step.
         code = (
             ErrorCode.PRIOR_GATE_FAILED
-            if "aannames" in str(exc)
+            if isinstance(exc, _PriorGateFailed)
             else ErrorCode.CONFIG_INVALID
         )
         runs.mark_failed(
@@ -337,3 +406,11 @@ def run_model_run(
 
 class _SamplingFailed(Exception):
     """The sampler itself failed. Retrying an identical configuration will fail again."""
+
+
+class _PriorGateFailed(SpecError):
+    """The priors do not admit the observed data. Carries the review so it can be stored."""
+
+    def __init__(self, message: str, review: dict):
+        super().__init__(message)
+        self.review = review

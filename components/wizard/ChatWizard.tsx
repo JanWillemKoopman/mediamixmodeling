@@ -22,9 +22,9 @@ import { humanizeError } from "@/lib/humanizeMessage";
 import { createClient } from "@/lib/supabase/client";
 import { useWizardChat } from "@/components/WizardChatContext";
 import { derivePhase, isWaitingPhase, type WizardPhase } from "@/lib/wizard/phase";
+import { RUN_STATE_LABEL, isRunning } from "@/lib/types";
 import { PHASE_SCRIPT, PHASE_STEPS } from "@/lib/wizard/script";
 import { matchOption, YES_OPTION } from "@/lib/wizard/questions";
-import { STANDARD_SAMPLE } from "@/lib/wizard/tuningDefaults";
 import { uploadSourceFile } from "@/lib/wizard/turns/upload";
 import * as inspectTurn from "@/lib/wizard/turns/inspect";
 import { confirmMappingFromRecipe } from "@/lib/wizard/turns/inspect";
@@ -37,10 +37,8 @@ import * as reviewTurn from "@/lib/wizard/turns/review";
 import type { TurnEnv, TurnReplyResult } from "@/lib/wizard/turns/types";
 import { DatasetPreviewTable } from "@/components/DatasetPreviewTable";
 import { SummaryView } from "@/components/SummaryView";
-import { HierarchicalSummaryView } from "@/components/HierarchicalSummaryView";
 import { AnalysisView } from "@/components/AnalysisView";
-import { isHierSummary } from "@/lib/types";
-import type { DataInspection, Dataset, Job, JobConfig, ModelRun, PrepareRecipe, SourceFile } from "@/lib/types";
+import type { DatasetRecipe, ModelIntent, ProjectSnapshot } from "@/lib/types";
 import { Markdown } from "@/components/Markdown";
 
 // Wat de architect op dit moment aan het doen is — puur voor de statusindicator, geen
@@ -66,7 +64,7 @@ interface Turn {
 }
 
 interface PendingProposal {
-  kind: "recipe" | "config";
+  kind: "recipe" | "intent";
   payload: unknown;
 }
 
@@ -103,7 +101,16 @@ function matchBackCommand(text: string): { phase: WizardPhase; label: string } |
 // Wachtindicator met verstreken-tijd én stall-detectie: bij een asynchrone stap (samenvoegen
 // of berekenen) toont hij hoelang we al wachten, en na een drempel een escalatiebanner — zodat
 // een vastgelopen worker niet als een eeuwig draaiende spinner zonder signaal verschijnt.
-function WaitingIndicator({ phase, since }: { phase: WizardPhase; since: string | null }) {
+function WaitingIndicator({
+  phase,
+  since,
+  stage,
+}: {
+  phase: WizardPhase;
+  since: string | null;
+  /** Welke stap de worker nu doet, in mensentaal — leeg zolang er nog niets draait. */
+  stage: string | null;
+}) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30000);
@@ -115,7 +122,7 @@ function WaitingIndicator({ phase, since }: { phase: WizardPhase; since: string 
   return (
     <div className="space-y-2">
       <p className="flex items-center gap-2 text-sm text-fg-faint">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> Bezig…
+        <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> {stage ?? "Bezig…"}
         {since && <span>· {elapsedMin === 0 ? "net gestart" : `${elapsedMin} min bezig`}</span>}
       </p>
       {stalled && (
@@ -148,33 +155,27 @@ function Bubble({ role, text }: { role: "user" | "assistant"; text: string }) {
 }
 
 export function ChatWizard({
-  projectId,
-  sources,
-  dataset,
-  jobs,
-  runs,
-  jobConfigs,
-  kpiMargin,
-  industry,
-  companyDescription,
+  snapshot,
   contextProvided,
-  latestInspection,
 }: {
-  projectId: string;
-  sources: SourceFile[];
-  dataset: Dataset | null;
-  jobs: Job[];
-  runs: ModelRun[];
-  jobConfigs: Record<string, JobConfig>;
-  kpiMargin: number | null;
-  industry: string | null;
-  companyDescription: string | null;
+  snapshot: ProjectSnapshot;
   contextProvided: boolean;
-  latestInspection: DataInspection | null;
 }) {
+  const { project, sources, dataset, approvedDataset, configuration, runs, inspection } = snapshot;
+  const projectId = project.id;
+  const kpiMargin = project.kpi_margin ?? null;
   const router = useRouter();
-  const { pendingChatMessage, clearPendingChatMessage, overridePhase, overrideReason, clearOverridePhase, goToPhase, reuseJobConfig, setReuseJobConfig, clearReuseJobConfig } =
-    useWizardChat();
+  const {
+    pendingChatMessage,
+    clearPendingChatMessage,
+    overridePhase,
+    overrideReason,
+    clearOverridePhase,
+    goToPhase,
+    reuseIntent,
+    setReuseIntent,
+    clearReuseIntent,
+  } = useWizardChat();
   // "Overslaan" bij de zakelijke context bewaren we per project, zodat de stap niet na een
   // refresh of terugkomst opnieuw opduikt (client-side, geen serverwijziging nodig).
   const skipKey = `mmm:skipContext:${projectId}`;
@@ -186,20 +187,28 @@ export function ChatWizard({
       // localStorage niet beschikbaar — dan geldt alleen de sessie-state.
     }
   }, [skipKey]);
-  const naturalPhase: WizardPhase = derivePhase({ sources, dataset, jobs, runs, contextProvided, skipContext });
+  const naturalPhase: WizardPhase = derivePhase({
+    sources,
+    dataset,
+    configuration,
+    runs,
+    contextProvided,
+    skipContext,
+  });
   // Terugkoppeling/iteratie: een override toont een eerdere fase zonder de deterministische
   // afleiding zelf aan te passen (zie WizardChatContext.goToPhase).
   const phase: WizardPhase = overridePhase ?? naturalPhase;
   const source = sources[0] ?? null;
-  const activeFitJob = jobs.find(
-    (j) => (j.type === "fit" || j.type === "fit_hierarchical") && (j.status === "queued" || j.status === "running"),
-  );
+  const activeRun = runs.find((r) => isRunning(r.run)) ?? null;
   const waitingSince =
     naturalPhase === "fitting"
-      ? activeFitJob?.created_at ?? null
+      ? activeRun?.run.created_at ?? null
       : naturalPhase === "prepare_running"
         ? dataset?.created_at ?? null
         : null;
+  // What the worker is doing right now, in the user's words. v1 showed a bare spinner for
+  // minutes with no way to tell a healthy long fit from a dead container.
+  const activeStage = activeRun ? RUN_STATE_LABEL[activeRun.run.state] : null;
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
@@ -262,15 +271,15 @@ export function ChatWizard({
     projectId,
     source,
     dataset,
-    jobs,
+    approvedDataset,
+    configuration,
     runs,
-    jobConfigs,
     kpiMargin,
-    latestInspection,
+    latestInspection: inspection,
     phaseState,
     setPhaseState,
-    reuseJobConfig,
-    setReuseJobConfig,
+    reuseIntent,
+    setReuseIntent,
     pushMessage: (text: string) => setTurns((prev) => [...prev, { role: "assistant", text }]),
     refresh: () => router.refresh(),
     skipBusinessContext: () => {
@@ -327,7 +336,7 @@ export function ChatWizard({
             text?: string;
             reply?: string;
             error?: string;
-            proposedConfig?: unknown;
+            proposedIntent?: unknown;
             proposedRecipe?: unknown;
             phase?: string;
             tool?: string;
@@ -346,8 +355,8 @@ export function ChatWizard({
           } else if (ev.type === "done") {
             const proposal: PendingProposal | null = ev.proposedRecipe
               ? { kind: "recipe", payload: ev.proposedRecipe }
-              : ev.proposedConfig
-                ? { kind: "config", payload: ev.proposedConfig }
+              : ev.proposedIntent
+                ? { kind: "intent", payload: ev.proposedIntent }
                 : null;
             setPendingProposal(proposal);
             const replyText = ev.reply || "Geen aanvullende toelichting.";
@@ -377,23 +386,24 @@ export function ChatWizard({
   // Een AI-voorstel overnemen ("ja, toepassen"): dezelfde flow als de oude kaarten. Een
   // recept start de prepare-job; een config bevestigt eerst de tuning (net als de oude
   // "Start de berekening"-knop) en start daarna de fit.
-  async function applyProposal(kind: "recipe" | "config", payload: unknown) {
+  // Taking over an AI proposal. Every proposal — from the chat, from a diagnosis after a
+  // failure, from anywhere — goes through this one path, and this path always starts with the
+  // user typing "ja". There is deliberately no code route by which a proposal applies itself.
+  async function applyProposal(kind: "recipe" | "intent", payload: unknown) {
     setBusy(true);
     setError(null);
     try {
       if (kind === "recipe") {
         const { reasoning: _r, ...rest } = payload as { reasoning?: string } & Record<string, unknown>;
-        const recipe = rest as unknown as PrepareRecipe;
+        const recipe = rest as unknown as DatasetRecipe;
         const res = await fetch("/api/datasets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ project_id: projectId, recipe }),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error);
-        // Een toegepast recept legt de kolomrollen al net zo hard vast als handmatig
-        // bevestigen (optie 1 in de inspect-fase) — zonder dit blijft de fase-afleiding voor
-        // altijd "inspect" melden, ook al draait de samenvoeging allang (zie
-        // lib/wizard/turns/inspect.ts: confirmMappingFromRecipe).
+        // Applying a recipe pins the column roles just as firmly as confirming them by hand;
+        // without this the phase machine would keep reporting "inspect" while the merge ran.
         if (source && !source.inspection_confirmed_at) {
           await confirmMappingFromRecipe(source, recipe);
         }
@@ -402,39 +412,18 @@ export function ChatWizard({
           {
             role: "assistant",
             text:
-              "Toegepast — ik voeg de data samen en controleer de kwaliteit. Dat duurt meestal minder dan een minuut; " +
-              "ik laat het hier vanzelf weten zodra het klaar is, dan bekijken we samen het kwaliteitsrapport.",
+              "Toegepast — ik voeg de data samen en controleer de kwaliteit. Dat duurt meestal " +
+              "minder dan een minuut; ik laat het hier vanzelf weten zodra het klaar is.",
           },
         ]);
       } else {
         const { reasoning: _r, ...rest } = payload as { reasoning?: string } & Record<string, unknown>;
-        const model = (rest.model as Record<string, unknown> | undefined) ?? {};
-        if (dataset) {
-          const { kpi: _kpi, ...tuningDraft } = model;
-          const confirmRes = await fetch(`/api/datasets/${dataset.id}/confirm-tuning`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tuning_draft: tuningDraft }),
-          });
-          if (!confirmRes.ok) throw new Error((await confirmRes.json().catch(() => ({}))).error);
+        const intent = rest as unknown as ModelIntent;
+        const result = await tuningTurn.startRun(turnEnv, intent);
+        if (result.reply) {
+          setTurns((prev) => [...prev, { role: "assistant", text: result.reply as string }]);
         }
-        const config = { ...rest, sample: reuseJobConfig?.sample ?? STANDARD_SAMPLE };
-        const res = await fetch("/api/jobs", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project_id: projectId, type: "fit", dataset_id: dataset?.id ?? null, config }),
-        });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error);
-        clearReuseJobConfig();
-        setTurns((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            text:
-              "Toegepast — de berekening start. Dit is een uitgebreide berekening en duurt meestal 3 tot 5 minuten; " +
-              "ik laat het hier vanzelf weten zodra die klaar is, dan bespreken we samen het resultaat.",
-          },
-        ]);
+        clearReuseIntent();
       }
       router.refresh();
     } catch (e) {
@@ -485,6 +474,9 @@ export function ChatWizard({
       const result = await turnModule.resolve(turnEnv, text);
       if (result.handled) {
         if (result.reply) setTurns((prev) => [...prev, { role: "assistant", text: result.reply as string }]);
+        // A turn can produce a proposal too (a diagnosis after a failure, say). It lands in
+        // the same pending slot as a chat proposal, so it needs the same "ja" to apply.
+        if (result.proposal) setPendingProposal(result.proposal);
         if (result.refresh) router.refresh();
         if (!result.delegatedBusy) setBusy(false);
         return;
@@ -512,10 +504,12 @@ export function ChatWizard({
   const turnIntro = turnModule ? turnModule.intro(turnEnv) : "";
   const introText = turnIntro ? `${script.message}\n\n${turnIntro}` : script.message;
 
-  const viewedRun = (phase === "review" || phase === "published") && runs.length > 0 ? reviewTurn.viewedRun(turnEnv) : null;
-  const viewedIsHierarchical = viewedRun ? isHierSummary(viewedRun.summary) : false;
-  const viewedLikelihood = viewedRun?.job_id ? jobConfigs[viewedRun.job_id]?.model.likelihood : undefined;
-  const isCountKpi = viewedLikelihood === "poisson" || viewedLikelihood === "negative_binomial";
+  const viewedRun =
+    (phase === "review" || phase === "published") && runs.length > 0 ? reviewTurn.viewedRun(turnEnv) : null;
+  // Only shown when the verdict allows it. A model that finished computing but did not clear
+  // the bar shows its reasons, not its numbers.
+  const viewedSummary = phase === "review" || phase === "published" ? reviewTurn.viewedSummary(turnEnv) : null;
+
 
   return (
     <div className="flex h-full flex-col">
@@ -546,14 +540,17 @@ export function ChatWizard({
           <div className="flex-1 space-y-3">
             <Bubble role="assistant" text={introText} />
             {phase === "prepare_review" && dataset?.preview && <DatasetPreviewTable preview={dataset.preview} />}
-            {viewedRun &&
-              (viewedIsHierarchical ? (
-                <HierarchicalSummaryView summary={viewedRun.summary as unknown as Parameters<typeof HierarchicalSummaryView>[0]["summary"]} />
-              ) : (
-                <SummaryView summary={viewedRun.summary} kpiMargin={kpiMargin} isCountKpi={isCountKpi} />
-              ))}
-            {viewedRun && !viewedIsHierarchical && viewedRun.analysis && <AnalysisView analysis={viewedRun.analysis} />}
-            {isWaitingPhase(phase) && <WaitingIndicator phase={phase} since={waitingSince} />}
+            {viewedSummary && (
+              <SummaryView
+                summary={viewedSummary}
+                validation={viewedRun?.validation ?? null}
+                kpiMargin={kpiMargin}
+              />
+            )}
+            {viewedSummary && viewedRun?.result?.analysis && (
+              <AnalysisView analysis={viewedRun.result.analysis} />
+            )}
+            {isWaitingPhase(phase) && <WaitingIndicator phase={phase} since={waitingSince} stage={activeStage} />}
           </div>
         </div>
 

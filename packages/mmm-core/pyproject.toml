@@ -19,7 +19,6 @@ dependencies = [
 # which keeps the core test loop fast to install and run.
 model = [
     "pymc>=5.16",
-    "pymc-marketing>=0.7",
     "numpyro>=0.15",
     "arviz>=0.18",
 ]

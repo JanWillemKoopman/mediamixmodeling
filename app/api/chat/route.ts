@@ -5,8 +5,15 @@ import { createClient } from "@/lib/supabase/server";
 import { buildRequest, parseBusinessContextInput } from "@/lib/anthropic/architect";
 import type { ArchitectFitContext } from "@/lib/anthropic/fitContext";
 import type { ArchitectDatasetContext } from "@/lib/anthropic/datasetContext";
-import { isHierSummary } from "@/lib/types";
-import type { DataInspection, Dataset, FitSummary, JobConfig, JobStatus, PriorPredictiveReview, ProjectContext, SourceFile } from "@/lib/types";
+import type {
+  DataInspection,
+  DatasetVersion,
+  FitSummary,
+  ModelValidation,
+  ProjectContext,
+  RunErrorCode,
+  SourceFile,
+} from "@/lib/types";
 import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
 // Tool names the architect can call — kept here so the route and the frontend agree on
@@ -17,7 +24,7 @@ import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 // tool call); give the route the same headroom as the other Claude routes.
 export const maxDuration = 120;
 
-const PROPOSAL_TOOLS = ["propose_prepare_recipe", "propose_model_config"] as const;
+const PROPOSAL_TOOLS = ["propose_prepare_recipe", "propose_model_intent"] as const;
 const ALL_TOOLS = [...PROPOSAL_TOOLS, "record_business_context"] as const;
 
 // Load prior chat history for a project so the panel survives a page refresh.
@@ -43,8 +50,8 @@ async function handleGet(request: Request) {
       supabase.schema("mmm").from("source_files").select("id").eq("project_id", projectId),
       supabase
         .schema("mmm")
-        .from("datasets")
-        .select("status")
+        .from("dataset_versions")
+        .select("status, approved_at")
         .eq("project_id", projectId)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -52,7 +59,7 @@ async function handleGet(request: Request) {
       supabase
         .schema("mmm")
         .from("model_runs")
-        .select("summary, created_at")
+        .select("id, state, created_at")
         .eq("project_id", projectId)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -70,11 +77,23 @@ async function handleGet(request: Request) {
 
   // A compact "wat ziet de architect nu?"-summary for the panel header: transparency about
   // the context every chat turn is grounded in, so the builder knows what they can refer to.
-  const gate = (run?.summary as { quality_gate?: { verdict?: string } | null } | null)?.quality_gate?.verdict;
+  let level: string | null = null;
+  if (run?.id) {
+    const { data: validation } = await supabase
+      .schema("mmm")
+      .from("model_validations")
+      .select("level")
+      .eq("model_run_id", run.id as string)
+      .maybeSingle();
+    level = (validation?.level as string | null) ?? null;
+  }
   const context = {
     n_sources: srcCount?.length ?? 0,
     dataset_status: (ds?.status as string | null) ?? null,
-    last_fit: run ? { date: (run.created_at as string).slice(0, 10), verdict: gate ?? null } : null,
+    dataset_approved: Boolean(ds?.approved_at),
+    last_run: run
+      ? { date: (run.created_at as string).slice(0, 10), state: run.state as string, level }
+      : null,
     n_business_notes: ((bizCtx?.notes as unknown[] | null) ?? []).length,
     has_inspection: Boolean(inspect),
   };
@@ -109,7 +128,6 @@ async function handlePost(request: Request) {
     { data: sources },
     { data: priorRows },
     { data: runRows },
-    { data: latestFitJob },
     { data: latestDataset },
     { data: projectContext },
     { data: latestInspection },
@@ -117,7 +135,7 @@ async function handlePost(request: Request) {
       supabase
         .schema("mmm")
         .from("source_files")
-        .select("id, project_id, name, storage_path, role_hint, preview, profile, mapping, created_at")
+        .select("id, project_id, name, storage_path, preview, profile, mapping, inspection_confirmed_at, created_at")
         .eq("project_id", projectId)
         .order("created_at"),
       supabase
@@ -126,33 +144,22 @@ async function handlePost(request: Request) {
         .select("role, content")
         .eq("project_id", projectId)
         .order("created_at"),
-      // The latest fit result and the latest FIT job give the architect its "resultaatinzicht":
-      // it can interpret a completed fit or diagnose a failed one. Filtered to type='fit' —
-      // the jobs table now also carries 'prepare' jobs, which are a different context (below).
-      // Newest run first, plus a few earlier ones: the newest is the full "resultaat-
-      // inzicht", the earlier ones become a compact history digest so the architect can
-      // compare runs ("is B beter dan A?") instead of only seeing the last one.
+      // The newest runs give the architect its "resultaatinzicht": it can interpret a
+      // finished run or diagnose a failed one. The newest is the full picture; the earlier
+      // ones become a compact digest so it can compare ("is B beter dan A?") rather than
+      // only seeing the last one.
       supabase
         .schema("mmm")
         .from("model_runs")
-        .select("summary, created_at")
+        .select("id, state, error_code, error_message, created_at")
         .eq("project_id", projectId)
         .order("created_at", { ascending: false })
         .limit(4),
+      // The latest dataset version (recipe + suitability report) is the data-preparation
+      // context — the step before modelling.
       supabase
         .schema("mmm")
-        .from("jobs")
-        .select("status, error, config, created_at")
-        .eq("project_id", projectId)
-        .eq("type", "fit")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      // The latest dataset (merge recipe + quality report) gives the architect its
-      // data-preparation context — the step before modelling.
-      supabase
-        .schema("mmm")
-        .from("datasets")
+        .from("dataset_versions")
         .select("*")
         .eq("project_id", projectId)
         .order("created_at", { ascending: false })
@@ -177,54 +184,49 @@ async function handlePost(request: Request) {
         .maybeSingle(),
     ]);
 
-  // The latest prior-predictive review (its own lightweight job type), if one has run — a
-  // cheap pre-fit sanity check the architect reads before proposing/spending a fit.
-  const { data: latestPp } = await supabase
-    .schema("mmm")
-    .from("jobs")
-    .select("prior_predictive, created_at")
-    .eq("project_id", projectId)
-    .eq("type", "prior_predictive")
-    .eq("status", "succeeded")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const runList = runRows ?? [];
+  const latestRun = runList[0] ?? null;
 
-  const latestRun = runRows?.[0] ?? null;
-  // History digest: the runs before the newest, minus hierarchical summaries (their
-  // shape has no flat channels/diagnostics for the one-line digest).
-  const previousRuns = (runRows ?? [])
-    .slice(1)
-    .filter((r) => !isHierSummary(r.summary))
-    .map((r) => ({ summary: r.summary as FitSummary, created_at: r.created_at as string }));
+  // Results and the verdict live in their own tables; a run row on its own says only what
+  // happened, not what came out of it.
+  const runIds = runList.map((r) => r.id as string);
+  const [{ data: resultRows }, { data: validationRows }] = runIds.length
+    ? await Promise.all([
+        supabase.schema("mmm").from("model_results").select("model_run_id, summary").in("model_run_id", runIds),
+        supabase.schema("mmm").from("model_validations").select("*").in("model_run_id", runIds),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const summaryByRun = new Map((resultRows ?? []).map((r) => [r.model_run_id as string, r.summary as FitSummary]));
+  const validationByRun = new Map(
+    (validationRows ?? []).map((v) => [v.model_run_id as string, v as unknown as ModelValidation]),
+  );
 
+  const latestSummary = latestRun ? summaryByRun.get(latestRun.id as string) ?? null : null;
   const fit: ArchitectFitContext = {
-    latestRun: latestRun
-      ? { summary: latestRun.summary as FitSummary, created_at: latestRun.created_at as string }
+    latestRun: latestSummary
+      ? { summary: latestSummary, created_at: latestRun!.created_at as string }
       : null,
-    previousRuns,
-    latestJob: latestFitJob
+    previousRuns: runList
+      .slice(1)
+      .map((r) => ({ summary: summaryByRun.get(r.id as string), created_at: r.created_at as string }))
+      .filter((r): r is { summary: FitSummary; created_at: string } => Boolean(r.summary)),
+    latestRunState: latestRun
       ? {
-          status: latestFitJob.status as JobStatus,
-          error: (latestFitJob.error as string | null) ?? null,
-          config: latestFitJob.config as JobConfig,
-          created_at: latestFitJob.created_at as string,
+          state: latestRun.state as string,
+          error_code: (latestRun.error_code as RunErrorCode | null) ?? null,
+          error_message: (latestRun.error_message as string | null) ?? null,
+          created_at: latestRun.created_at as string,
         }
       : null,
-    priorPredictive: latestPp?.prior_predictive
-      ? {
-          review: latestPp.prior_predictive as PriorPredictiveReview,
-          created_at: latestPp.created_at as string,
-        }
-      : null,
+    validation: latestRun ? validationByRun.get(latestRun.id as string) ?? null : null,
   };
   const dataset: ArchitectDatasetContext = {
-    latestDataset: (latestDataset as Dataset | null) ?? null,
+    latestDataset: (latestDataset as DatasetVersion | null) ?? null,
   };
   const businessContext = (projectContext as ProjectContext | null) ?? null;
   const inspection = (latestInspection as DataInspection | null) ?? null;
 
-  const sourceFiles = (sources ?? []) as SourceFile[];
+  const sourceFiles = (sources ?? []) as unknown as SourceFile[];
   // The preview is cached on the row at upload time (see SourceUpload.tsx) instead of
   // downloaded from Storage on every chat turn.
   const previews = sourceFiles.map((f) => ({ file: f, preview: f.preview ?? null }));
@@ -367,7 +369,7 @@ async function handlePost(request: Request) {
         send({
           type: "done",
           reply: replyText,
-          proposedConfig: toolUse?.name === "propose_model_config" ? toolUse.input : null,
+          proposedIntent: toolUse?.name === "propose_model_intent" ? toolUse.input : null,
           proposedRecipe: toolUse?.name === "propose_prepare_recipe" ? toolUse.input : null,
           usage: response.usage,
         });

@@ -82,6 +82,7 @@ def test_finite_values_pass_through_unchanged():
 def _summary(**kw) -> FitSummary:
     defaults = dict(
         kpi="revenue",
+        kpi_type="revenue",
         n_weeks=52,
         window=("2024-01-01", "2024-12-23"),
         baseline_contribution=_iv(1000.0),

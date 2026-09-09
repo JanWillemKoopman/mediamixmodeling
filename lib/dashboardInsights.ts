@@ -102,7 +102,11 @@ const worst = (a: TrustLevel, b: TrustLevel): TrustLevel => {
 // ("terug naar tuning" vs. "terug naar data") in plaats van één ondifferentieerde badge.
 export function layeredTrustVerdict(summary: FitSummary): LayeredTrustVerdict {
   const d = summary.diagnostics;
-  const gate = summary.quality_gate;
+  const gate = summary.validation
+    ? {
+        reasons: [...summary.validation.blocking_reasons, ...summary.validation.warning_reasons],
+      }
+    : null;
 
   // Als de rekenkern al een kwaliteitspoort meegaf, is die tekstueel leidend (ze kent de
   // exacte drempels/steekproefgrootte) — we partitioneren de reasons per laag op trefwoord;
@@ -118,7 +122,7 @@ export function layeredTrustVerdict(summary: FitSummary): LayeredTrustVerdict {
     if (Math.abs(d.interval_coverage_94 - 0.94) > 0.1) fitReasons.push("De onzekerheidsmarges dekken de werkelijkheid niet goed af.");
     if (!d.decomposition_ok) fitReasons.push("De opbouw telt niet netjes op tot het totaal.");
     if (d.r2 < 0.5) fitReasons.push("Het model verklaart minder dan de helft van de schommelingen in de KPI.");
-    if (d.mape > 0.2) fitReasons.push("De voorspelling zit gemiddeld meer dan 20% naast de werkelijke KPI.");
+    if (d.mape != null && d.mape > 0.2) fitReasons.push("De voorspelling zit gemiddeld meer dan 20% naast de werkelijke KPI.");
   }
 
   // De metrics zelf (niet het aggregaat-verdict van de poort) bepalen het niveau per laag
@@ -253,7 +257,11 @@ export function recommendedActions(summary: FitSummary, kpiMargin?: number | nul
   }
 
   // 3) Vrijwel zekere verliesgevers afbouwen (ROAS-band volledig onder break-even).
-  const losers = summary.channels.filter((ch) => ch.roas.p97 <= breakEven && ch.total_spend > 0);
+  // Only currency channels: "return per e-mail sent" cannot be compared with a break-even
+  // ROAS, and a channel with no spend has no return at all.
+  const losers = summary.channels.filter(
+    (ch) => ch.unit === "currency" && ch.roas != null && ch.roas.p97 <= breakEven && ch.total_spend > 0,
+  );
   if (losers.length > 0) {
     const names = losers.map((c) => c.name).join(", ");
     actions.push({

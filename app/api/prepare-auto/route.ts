@@ -5,12 +5,7 @@ import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildRequest } from "@/lib/anthropic/architect";
 import type { ArchitectFitContext } from "@/lib/anthropic/fitContext";
-import type {
-  DataInspection,
-  PrepareRecipe,
-  ProjectContext,
-  SourceFile,
-} from "@/lib/types";
+import type { DataInspection, DatasetRecipe, ProjectContext, SourceFile } from "@/lib/types";
 
 // Preview-first data preparation (point 3). The architect proposes ONE complete merge
 // recipe — which files, column roles, cleaning steps, derived variables and event dummies —
@@ -50,7 +45,7 @@ async function handlePost(request: Request) {
     supabase
       .schema("mmm")
       .from("source_files")
-      .select("id, project_id, name, storage_path, role_hint, preview, profile, mapping, created_at")
+      .select("id, project_id, name, storage_path, preview, profile, mapping, inspection_confirmed_at, created_at")
       .eq("project_id", projectId)
       .order("created_at"),
     supabase.schema("mmm").from("project_context").select("*").eq("project_id", projectId).maybeSingle(),
@@ -65,14 +60,14 @@ async function handlePost(request: Request) {
       .maybeSingle(),
   ]);
 
-  const sourceFiles = (sources ?? []) as SourceFile[];
+  const sourceFiles = (sources ?? []) as unknown as SourceFile[];
   if (sourceFiles.length === 0) {
     return NextResponse.json({ error: "Upload eerst bronbestanden." }, { status: 400 });
   }
   const previews = sourceFiles.map((f) => ({ file: f, preview: f.preview ?? null }));
   const businessContext = (projectContext as ProjectContext | null) ?? null;
   const inspection = (latestInspection as DataInspection | null) ?? null;
-  const emptyFit: ArchitectFitContext = { latestRun: null, latestJob: null, priorPredictive: null };
+  const emptyFit: ArchitectFitContext = { latestRun: null, latestRunState: null, validation: null };
 
   const client = new Anthropic({ apiKey });
   const history: Anthropic.MessageParam[] = [
@@ -116,7 +111,7 @@ async function handlePost(request: Request) {
     });
   }
 
-  const recipe = toolUse.input as PrepareRecipe;
+  const recipe = toolUse.input as DatasetRecipe;
   return NextResponse.json({ recipe, reasoning });
 }
 

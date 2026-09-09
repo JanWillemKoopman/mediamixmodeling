@@ -63,11 +63,11 @@ async function handlePost(request: Request) {
   const supabase = createClient();
   let runQuery = supabase
     .schema("mmm")
-    .from("model_runs")
+    .from("model_results")
     .select("id, summary")
     .eq("project_id", projectId);
   runQuery = modelRunId
-    ? runQuery.eq("id", modelRunId)
+    ? runQuery.eq("model_run_id", modelRunId)
     : runQuery.order("created_at", { ascending: false }).limit(1);
   const { data: run } = await runQuery.maybeSingle();
 
@@ -123,7 +123,7 @@ async function handlePost(request: Request) {
 
   const { error: updateErr } = await supabase
     .schema("mmm")
-    .from("model_runs")
+    .from("model_results")
     .update({ analysis })
     .eq("id", run.id);
   if (updateErr) {

@@ -1,4 +1,10 @@
-import type { FitSummary, JobConfig, JobStatus, Interval, PriorPredictiveReview } from "@/lib/types";
+import type {
+  ChannelResult,
+  FitSummary,
+  Interval,
+  ModelValidation,
+  RunErrorCode,
+} from "@/lib/types";
 
 // Turns a project's latest fit result (or failed/running job) into a compact Dutch text
 // block for the architect, and decides which model should reason about it. Kept pure and
@@ -6,10 +12,16 @@ import type { FitSummary, JobConfig, JobStatus, Interval, PriorPredictiveReview 
 
 export interface ArchitectFitContext {
   latestRun: { summary: FitSummary; created_at: string } | null;
-  latestJob: { status: JobStatus; error: string | null; config: JobConfig; created_at: string } | null;
-  // The latest prior-predictive review (KPI range implied by the priors), if one was run —
-  // a cheap pre-fit sanity check the architect should read and act on before spending a fit.
-  priorPredictive?: { review: PriorPredictiveReview; created_at: string } | null;
+  /** The lifecycle state of the newest run, whether or not it produced a result. */
+  latestRunState?: {
+    state: string;
+    error_code: RunErrorCode | null;
+    /** Already plain language — the worker never puts a traceback in this field. */
+    error_message: string | null;
+    created_at: string;
+  } | null;
+  /** The verdict on the newest run: the level, the reasons, and what it is allowed to show. */
+  validation?: ModelValidation | null;
   // Up to a few runs BEFORE latestRun (newest first), each as a one-line digest — enough
   // for the architect to answer "is deze run beter dan de vorige, en waarom?" without
   // blowing up the context. Sits after the last cache breakpoint like the rest of this block.
@@ -29,7 +41,7 @@ export const ARCHITECT_ANALYST_MODEL = "claude-sonnet-5";
 // completed or a job has failed — that is when the analyst role kicks in.
 export function hasFitResults(ctx: ArchitectFitContext): boolean {
   if (ctx.latestRun) return true;
-  return ctx.latestJob?.status === "failed";
+  return ctx.latestRunState?.state === "failed";
 }
 
 function pct(n: number | undefined): string {
@@ -42,41 +54,44 @@ function iv(x: Interval, render: (n: number) => string): string {
   return `${render(x.p50)} [${render(x.p3)}–${render(x.p97)}]`;
 }
 
-function formatModelShape(config: JobConfig): string {
-  const m = config.model;
-  const chans = m.channels
-    .map((c) => `${c.name}(${c.channel_type ?? "generic"}/${c.adstock ?? "geometric"}/${c.saturation ?? "hill"})`)
-    .join(", ");
-  const parts = [
-    `kpi=${m.kpi}`,
-    `likelihood=${m.likelihood ?? "normal"}`,
-    `trend=${m.add_trend === false ? "geen" : (m.trend_type ?? "linear")}`,
-    `seizoen=${m.seasonality_periods ?? "uit"}`,
-    m.control_columns && m.control_columns.length ? `controls=[${m.control_columns.join(", ")}]` : "controls=[]",
-  ];
-  return `${parts.join(", ")}; kanalen: ${chans}`;
+// A channel's return, worded for its unit. Only a currency channel has a ROAS; calling
+// "KPI per e-mail sent" a ROAS invites it to be compared with, or traded against, euros.
+function describeReturn(ch: ChannelResult): string {
+  if (!ch.roas) return "geen uitgaven in deze periode";
+  if (ch.unit === "currency") return `ROAS ${iv(ch.roas, (n) => num(n))}`;
+  return `${iv(ch.roas, (n) => num(n, 4))} per ${ch.unit}`;
 }
 
 function formatSummary(summary: FitSummary, createdAt: string): string {
   const d = summary.diagnostics;
-  const gate = summary.quality_gate;
   const lines: string[] = [];
-  lines.push(`Laatste fit (gedraaid ${createdAt.slice(0, 10)}) — KPI "${summary.kpi}", ${summary.n_weeks} weken (${summary.window[0]} t/m ${summary.window[1]}).`);
-  if (gate) {
-    lines.push(`Kwaliteitspoort: ${gate.verdict.toUpperCase()}${gate.reasons.length ? " — " + gate.reasons.join("; ") : "."}`);
-  }
   lines.push(
-    `Diagnostiek: R²=${num(d.r2)}, MAPE=${pct(d.mape)}, dekking(94%)=${pct(d.interval_coverage_94)}, ` +
-      `max R-hat=${num(d.max_r_hat, 3)}, divergenties=${d.n_divergences}, decompositie-ok=${d.decomposition_ok ? "ja" : "nee"}.`,
+    `Laatste berekening (${createdAt.slice(0, 10)}) — KPI "${summary.kpi}", ${summary.n_weeks} ` +
+      `weken (${summary.window[0]} t/m ${summary.window[1]})` +
+      (summary.weekly?.burn_in_weeks
+        ? `; de eerste ${summary.weekly.burn_in_weeks} weken bouwden alleen de na-ijl op en tellen niet mee.`
+        : "."),
+  );
+  lines.push(
+    `Diagnostiek: R²=${num(d.r2)}, MAPE=${pct(d.mape ?? undefined)}, ` +
+      `dekking 94/80/50%=${pct(d.interval_coverage_94)}/${pct(d.interval_coverage_80)}/${pct(d.interval_coverage_50)}, ` +
+      `max R-hat=${num(d.max_r_hat, 3)}, divergenties=${d.n_divergences}, ` +
+      `restsamenhang=${num(d.residual_autocorrelation ?? undefined)}, ` +
+      `decompositie-ok=${d.decomposition_ok ? "ja" : "nee"}.`,
   );
   lines.push(`Baseline (verkoop zonder marketing), mediaan: ${num(summary.baseline_contribution.p50, 0)} ${summary.kpi}.`);
   lines.push("Per kanaal (mediaan [p3–p97]):");
+  const identifiability = new Map(summary.identifiability.map((c) => [c.name, c]));
   for (const ch of summary.channels) {
+    const id = identifiability.get(ch.name);
     lines.push(
-      `  • ${ch.name}: aandeel ${iv(ch.contribution_share, pct)}, ROAS ${iv(ch.roas, (n) => num(n))}, ` +
-        `adstock-halfwaardetijd ${iv(ch.adstock_half_life_weeks, (n) => num(n, 1) + "wk")}, ` +
-        `verzadigingspunt ${iv(ch.saturation_point, (n) => num(n, 0))}, totale spend ${num(ch.total_spend, 0)}` +
-        (ch.direct_share ? `, direct-aandeel (zelfde week vs na-ijl) ${pct(ch.direct_share.p50)}` : "") +
+      `  • ${ch.name} (${ch.unit}): aandeel ${iv(ch.contribution_share, pct)}, ${describeReturn(ch)}, ` +
+        `na-ijl-halfwaardetijd ${iv(ch.adstock_half_life_weeks, (n) => num(n, 1) + "wk")}, ` +
+        `verzadigingspunt ${iv(ch.saturation_point, (n) => num(n, 0))}, totale druk ${num(ch.total_spend, 0)}` +
+        (ch.direct_share ? `, direct-aandeel ${pct(ch.direct_share.p50)}` : "") +
+        (id && id.verdict !== "identified"
+          ? ` — LET OP, dit kanaal is ${id.verdict === "not_identified" ? "NIET" : "zwak"} apart vast te stellen: ${id.reasons.join("; ")}`
+          : "") +
         `.`,
     );
   }
@@ -91,19 +106,34 @@ function formatSummary(summary: FitSummary, createdAt: string): string {
   return lines.join("\n");
 }
 
-function formatPriorPredictive(pp: NonNullable<ArchitectFitContext["priorPredictive"]>): string {
-  const r = pp.review;
+// The verdict, in the architect's context. This is what it must reason from before saying
+// anything about the result: a model at "technically_completed" has finished computing and
+// nothing more, and the architect may not talk about its channel numbers as findings.
+function formatValidation(v: ModelValidation): string {
   const lines = [
-    `Prior-predictive check (${pp.created_at.slice(0, 10)}) — het KPI-bereik dat de priors ALLEEN impliceren, vóór er gefit is:`,
-    `  Waargenomen KPI: ${num(r.observed_low, 0)}–${num(r.observed_high, 0)}. Prior-bereik: ${num(r.prior_low, 0)}–${num(r.prior_high, 0)}.`,
+    `Beoordeling van deze berekening: ${v.level.toUpperCase()} (regelset ${v.ruleset_version}).`,
+    `Wat er op grond hiervan getoond mag worden: ${v.allowed_outputs.join(", ") || "alleen diagnostiek"}.`,
   ];
-  if (r.ok) {
-    lines.push("  Oordeel: de priors zijn plausibel (ze omvatten de data en zijn niet absurd breed). Groen licht om te fitten.");
-  } else {
-    if (!r.admits_observed)
-      lines.push("  Oordeel: LET OP — de priors omvatten de waargenomen KPI niet; ze staan te strak. Verruim de relevante sigma('s) voordat je fit.");
-    if (!r.not_absurdly_wide)
-      lines.push("  Oordeel: LET OP — het prior-bereik is absurd breed (>20× de data); de priors zijn te weinig informatief. Verklein de relevante sigma('s).");
+  if (v.blocking_reasons.length) {
+    lines.push("BLOKKEREND:", ...v.blocking_reasons.map((r) => `  • ${r}`));
+  }
+  if (v.warning_reasons.length) {
+    lines.push("Aandachtspunten:", ...v.warning_reasons.map((r) => `  • ${r}`));
+  }
+  const unusable = v.per_channel.filter((c) => !c.usable);
+  if (unusable.length) {
+    lines.push(
+      "Kanalen waarvoor GEEN apart cijfer gegeven mag worden (noem ze niet als losse " +
+        "uitkomst, leg uit waarom niet):",
+      ...unusable.map((c) => `  • ${c.name}: ${c.reasons.join("; ")}`),
+    );
+  }
+  if (v.inseparable_groups.length) {
+    lines.push(
+      "Kanalen die alleen SAMEN te beoordelen zijn (hun som is wel betrouwbaar, de verdeling " +
+        "ertussen niet):",
+      ...v.inseparable_groups.map((g) => `  • ${g.join(" + ")}`),
+    );
   }
   return lines.join("\n");
 }
@@ -115,9 +145,9 @@ function formatRunHistoryBlock(runs: NonNullable<ArchitectFitContext["previousRu
   const lines = runs.map((r) => {
     const s = r.summary;
     const d = s.diagnostics;
-    const gate = s.quality_gate ? s.quality_gate.verdict.toUpperCase() : "?";
-    const chans = s.channels.map((c) => `${c.name} ROAS ${num(c.roas.p50)}`).join(", ");
-    return `  • ${r.created_at.slice(0, 10)}: poort=${gate}, R²=${num(d.r2)}, MAPE=${pct(d.mape)}, max R-hat=${num(d.max_r_hat, 3)}, div=${d.n_divergences}; ${chans}`;
+    const level = s.validation ? s.validation.level : "?";
+    const chans = s.channels.map((c) => `${c.name} ${describeReturn(c)}`).join(", ");
+    return `  • ${r.created_at.slice(0, 10)}: oordeel=${level}, R²=${num(d.r2)}, MAPE=${pct(d.mape ?? undefined)}, max R-hat=${num(d.max_r_hat, 3)}, div=${d.n_divergences}; ${chans}`;
   });
   return [
     "Eerdere runs van dit project (nieuwste eerst) — gebruik dit om de laatste fit te VERGELIJKEN met wat eraan voorafging (is het echt beter geworden, en waardoor?):",
@@ -126,40 +156,35 @@ function formatRunHistoryBlock(runs: NonNullable<ArchitectFitContext["previousRu
 }
 
 export function formatFitContextBlock(ctx: ArchitectFitContext): string {
-  const { latestRun, latestJob } = ctx;
+  const { latestRun, latestRunState, validation } = ctx;
   const historyBlock = ctx.previousRuns?.length ? `\n\n${formatRunHistoryBlock(ctx.previousRuns)}` : "";
-  const ppBlock =
-    (ctx.priorPredictive ? `\n\n${formatPriorPredictive(ctx.priorPredictive)}` : "") + historyBlock;
+  // The verdict comes FIRST, before any numbers. An architect that reads the channel table
+  // before it reads "this model is not usable" will discuss the numbers as findings.
+  const verdictBlock = validation ? `${formatValidation(validation)}\n\n` : "";
 
-  // A failed job that is newer than the last successful run is the most relevant thing to
-  // reason about (the builder just tried something and it broke).
-  const jobFailedAndNewest =
-    latestJob?.status === "failed" &&
-    (!latestRun || new Date(latestJob.created_at) > new Date(latestRun.created_at));
+  const failedAndNewest =
+    latestRunState?.state === "failed" &&
+    (!latestRun || new Date(latestRunState.created_at) >= new Date(latestRun.created_at));
 
-  if (jobFailedAndNewest && latestJob) {
+  if (failedAndNewest && latestRunState) {
     return [
-      `De laatste fit is MISLUKT (${latestJob.created_at.slice(0, 10)}).`,
-      `Foutmelding: ${latestJob.error ?? "(geen melding opgeslagen)"}`,
-      `Configuratie die faalde: ${formatModelShape(latestJob.config)}`,
-      "Diagnosticeer de oorzaak en stel een concrete, aangepaste configuratie voor die dit oplost.",
-    ].join("\n") + ppBlock;
+      `De laatste berekening is MISLUKT (${latestRunState.created_at.slice(0, 10)}).`,
+      `Reden (${latestRunState.error_code ?? "onbekend"}): ${latestRunState.error_message ?? "(geen melding opgeslagen)"}`,
+      "Diagnosticeer de oorzaak en stel een aangepaste modelintentie voor die dit oplost.",
+    ].join("\n") + historyBlock;
   }
 
+  const running = latestRunState && !["completed", "failed", "cancelled"].includes(latestRunState.state);
   if (latestRun) {
-    let block = formatSummary(latestRun.summary, latestRun.created_at);
-    if (latestJob && (latestJob.status === "queued" || latestJob.status === "running")) {
-      block += `\n\nLet op: er draait/wacht nu ook een nieuwe fit (status: ${latestJob.status}).`;
+    let block = verdictBlock + formatSummary(latestRun.summary, latestRun.created_at);
+    if (running) {
+      block += `\n\nLet op: er draait nu ook een nieuwe berekening (${latestRunState?.state}).`;
     }
-    return block + ppBlock;
+    return block + historyBlock;
   }
 
-  if (latestJob && (latestJob.status === "queued" || latestJob.status === "running")) {
-    return `Er draait nu een fit (status: ${latestJob.status}); er is nog geen afgerond resultaat om te bespreken.` + ppBlock;
+  if (running) {
+    return `Er draait nu een berekening (${latestRunState?.state}); er is nog geen afgerond resultaat om te bespreken.`;
   }
-
-  if (ctx.priorPredictive) {
-    return "Er is nog geen fit gedraaid, maar er is wel een prior-predictive check gedaan." + ppBlock;
-  }
-  return "Er is nog geen fit gedraaid voor dit project — er zijn nog geen resultaten om te bespreken.";
+  return "Er is nog geen berekening gedraaid voor dit project — er zijn nog geen resultaten om te bespreken.";
 }

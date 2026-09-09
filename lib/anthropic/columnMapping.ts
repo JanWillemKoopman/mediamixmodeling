@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ColumnMapping, ColumnMappingEntry, ColumnRole, SourceProfile } from "@/lib/types";
+import type { ChannelUnit, ColumnMapping, ColumnMappingEntry, ColumnRole, SourceProfile } from "@/lib/types";
 
 // A separate, cheap column-semantics classification (see /api/classify-columns): given one
 // uploaded file's header + a preview + its statistical profile, decide per column what it
@@ -12,6 +12,8 @@ import type { ColumnMapping, ColumnMappingEntry, ColumnRole, SourceProfile } fro
 // this is a classification task, not the architect's open-ended reasoning.
 
 const CLASSIFY_MODEL = "claude-haiku-4-5";
+
+const UNITS: ChannelUnit[] = ["currency", "impressions", "grp", "sendings", "clicks"];
 
 const SYSTEM = `Je bent een data-classificatie-assistent voor een Media Mix Model (MMM). Je krijgt de kolomkoppen, een paar voorbeeldrijen en een statistisch profiel van één geüpload databestand. Bepaal per kolom de betekenis en rol, en de vorm van het bestand. Verzin geen zakelijke context; classificeer alleen wat de kolomnaam, de waarden en het profiel ondersteunen.
 
@@ -116,7 +118,10 @@ export function parseColumnMapping(input: unknown): ColumnMapping | null {
       name: rc.name,
       role: validRole ? (role as ColumnRole | "date" | "ignore") : "ignore",
       meaning: typeof rc.meaning === "string" ? rc.meaning : "",
-      unit: typeof rc.unit === "string" ? rc.unit : null,
+      // The unit is only kept when it is one we can actually act on: an invented unit
+      // string would be worse than none, because downstream code decides on it whether a
+      // channel has a ROAS and takes part in budget optimisation at all.
+      unit: UNITS.includes(rc.unit as ChannelUnit) ? (rc.unit as ChannelUnit) : null,
       confidence:
         rc.confidence === "hoog" || rc.confidence === "middel" || rc.confidence === "laag"
           ? rc.confidence

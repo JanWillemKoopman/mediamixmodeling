@@ -14,7 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import { humanizeError } from "@/lib/humanizeMessage";
 import { postJson } from "@/lib/fetchJson";
 import { formatMenu, matchOption, type MenuOption } from "@/lib/wizard/questions";
-import type { ColumnMapping, ColumnMappingEntry, PrepareRecipe, DataInspection, SourceFile } from "@/lib/types";
+import type { ColumnMapping, ColumnMappingEntry, DatasetRecipe, DataInspection, SourceFile } from "@/lib/types";
 import type { TurnEnv, TurnReplyResult } from "@/lib/wizard/turns/types";
 
 const GRANULARITY_LABEL: Record<string, string> = {
@@ -106,7 +106,7 @@ function validMapping(mapping: ColumnMapping | null): string | null {
 // wat er bijvoorbeeld toe leidde dat een vrije-tekst antwoord als "ja doe dat" (bedoeld voor
 // de architect) hier per ongeluk als "klopt, ga door" werd opgevat. Toepassen van een recept
 // is dus een impliciete, minstens zo sterke bevestiging als optie 1 zelf.
-export async function confirmMappingFromRecipe(source: SourceFile, recipe: PrepareRecipe): Promise<void> {
+export async function confirmMappingFromRecipe(source: SourceFile, recipe: DatasetRecipe): Promise<void> {
   const src = recipe.sources[0];
   if (!src) return;
   const byName = new Map<string, ColumnMappingEntry>((source.mapping?.columns ?? []).map((c) => [c.name, c]));

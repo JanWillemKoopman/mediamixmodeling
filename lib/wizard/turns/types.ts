@@ -9,7 +9,14 @@
 // ChatWizard het bericht gewoon doorstuurt naar de architect (`/api/chat`) — precies zoals
 // vrij typen vandaag al werkt.
 
-import type { DataInspection, Dataset, Job, JobConfig, ModelRun, SourceFile } from "@/lib/types";
+import type {
+  DataInspection,
+  DatasetVersion,
+  ModelConfiguration,
+  ModelIntent,
+  RunView,
+  SourceFile,
+} from "@/lib/types";
 import type { WizardPhase } from "@/lib/wizard/phase";
 
 export interface TurnReplyResult {
@@ -23,15 +30,20 @@ export interface TurnReplyResult {
   // beurt beheert de eigen bezig-status (streaming), dus ChatWizard mag "busy" dan niet
   // voortijdig weer vrijgeven.
   delegatedBusy?: boolean;
+  // Een voorstel dat de gebruiker met "ja" kan overnemen. Zo loopt een AI-voorstel altijd
+  // langs dezelfde bevestiging, of het nu uit de chat komt of uit een verbeterronde — er is
+  // geen pad waarlangs een voorstel zichzelf uitvoert.
+  proposal?: { kind: "recipe" | "intent"; payload: unknown };
 }
 
 export interface TurnEnv {
   projectId: string;
   source: SourceFile | null;
-  dataset: Dataset | null;
-  jobs: Job[];
-  runs: ModelRun[];
-  jobConfigs: Record<string, JobConfig>;
+  dataset: DatasetVersion | null;
+  /** The approved version, if there is one — the only data a run may be based on. */
+  approvedDataset: DatasetVersion | null;
+  configuration: ModelConfiguration | null;
+  runs: RunView[];
   kpiMargin: number | null;
   // Nieuwste diepe data-inspectie (server-side opgehaald, via Realtime bijgewerkt) — puur
   // gelezen, nooit client-side gepolld: zo verschijnt de uitkomst altijd zodra de
@@ -43,10 +55,12 @@ export interface TurnEnv {
   // zodra de fase zelf wisselt.
   phaseState: unknown;
   setPhaseState: (s: unknown) => void;
-  // Vervangt de kapotte "config hergebruiken"-knop: de review-fase zet 'm, de tuning-fase
-  // leest 'm als startpunt i.p.v. de standaard sjabloon-config.
-  reuseJobConfig: JobConfig | null;
-  setReuseJobConfig: (c: JobConfig | null) => void;
+  // De review-fase zet 'm ("gebruik de instellingen van run 2"), de tuning-fase leest 'm
+  // als startpunt. Bewust de INTENTIE en niet de afgeleide instellingen: die worden per
+  // dataset opnieuw afgeleid, dus hergebruiken wat er letterlijk uitkwam zou de afstemming
+  // op de oude data vastzetten.
+  reuseIntent: ModelIntent | null;
+  setReuseIntent: (i: ModelIntent | null) => void;
   // Een los bericht direct in de chatstroom zetten — voor asynchrone uitkomsten (bv. de
   // diepe data-inspectie of een proefdraai die pas na een tijdje klaar is).
   pushMessage: (text: string) => void;

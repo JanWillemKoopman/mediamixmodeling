@@ -128,6 +128,19 @@ class RunStore(Protocol):
 
     def get_configuration(self, configuration_id: str) -> dict: ...
 
+    def save_resolved_spec(
+        self, configuration_id: str, *, spec: dict, spec_hash: str, provenance: list, issues: list
+    ) -> None:
+        """Persist the specification derived from the stated intent.
+
+        Derivation happens here rather than in the app because it needs measured statistics
+        of the actual dataset. Storing the result — with the provenance of every prior —
+        is what makes the run reproducible and the priors explainable afterwards.
+        """
+
+    def record_prior_gate(self, configuration_id: str, *, review: dict, passed: bool) -> None:
+        """Store the prior-predictive review and whether it cleared the gate."""
+
     def get_dataset_version(self, dataset_version_id: str) -> dict: ...
 
     def save_diagnostics(self, run_id: str, diagnostics: dict) -> None: ...

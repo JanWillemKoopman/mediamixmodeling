@@ -115,8 +115,13 @@ create table mmm.model_configurations (
   dataset_version_id  uuid not null references mmm.dataset_versions (id) on delete cascade,
 
   intent              jsonb not null,
-  resolved_spec       jsonb not null,
-  spec_sha256         text  not null,
+  -- Nullable, and filled by the worker rather than by the app. Prior derivation lives in
+  -- exactly one place (mmm_core.model.priors, in Python) because it needs measured
+  -- statistics of the actual dataset; a TypeScript reimplementation would be a second
+  -- source of truth for the most consequential numbers in the product. The app stores what
+  -- the user meant; the worker computes what that means for this data.
+  resolved_spec       jsonb,
+  spec_sha256         text,
   provenance          jsonb,   -- per prior: waar het getal vandaan komt, in gewone taal
   issues              jsonb,   -- ConfigIssue[]: blokkerend / waarschuwing / info
 

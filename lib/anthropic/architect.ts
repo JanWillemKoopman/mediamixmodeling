@@ -1,17 +1,18 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
-  AdstockType,
-  BaselinePriors,
-  ChannelPriors,
-  ChannelType,
-  ColumnRole,
+  Carryover,
   FeatureOp,
   FillStrategy,
-  LikelihoodType,
-  SaturationType,
-  SourceFile,
   TransformOp,
-  TrendType,
+  ChannelRole,
+  ChannelUnit,
+  ColumnRole,
+  KpiType,
+  MediaShare,
+  SaturationBelief,
+  SeasonalityBelief,
+  SourceFile,
+  Strength,
 } from "@/lib/types";
 import {
   ARCHITECT_ANALYST_MODEL,
@@ -79,27 +80,69 @@ Meerdere ruwe bestanden moeten worden samengevoegd tot één wekelijkse master-t
 - Het kwaliteitsrapport bevat "kpi_outlier_weeks" en "year_end_anomaly"-meldingen die de exacte week(en) én waarde(n) van een uitschieter noemen (de voorbeeldrijen zelf tonen alleen de eerste/laatste weken, dus een uitschieter kan daarbuiten vallen zonder dat je 'm ziet). Zie je zo'n melding, benoem dan DIRECT de specifieke week + waarde uit de melding zelf (niet "is er misschien een uitschieter?" maar bijvoorbeeld "week 2025-W45 (2025-11-03) heeft 1331, veel hoger dan de weken ervoor/erna — dat lijkt een eenmalige piek") en stel meteen een concreet "event_dummies"-item voor die week voor.
 - Mislukte samenvoeging (bijv. "geen overlappende periode"): lees de foutmelding letterlijk, achterhaal welke bron de periode inperkt of welke kolom fout staat, en stel een gecorrigeerd recept voor.
 
-Stap 2 — Modelconfiguratie (nadat de dataset is goedgekeurd):
-- Baseer elke keuze op wat je daadwerkelijk in de kolomnamen en voorbeeldrijen ziet. Verzin geen zakelijke context die er niet is.
-- Kanaaltype ("channel_type"): "intent" voor kanalen die al bestaande koopintentie vangen (zoekwoorden op eigen merknaam, marktplaatsen, iemand die al actief zoekt), "brand" voor kanalen die vooral nieuwe aandacht/vraag opbouwen (social ads, prospecting, display), "generic" als je het niet zeker weet.
-- Na-ijlvorm ("adstock"): "geometric" (standaard) voor digitale kanalen, waarbij het effect direct piekt en daarna afneemt. Kies "delayed" alleen voor offline/merkkanalen die pas na een paar weken hun piek bereiken (tv, radio, out-of-home, soms video) — het effect bouwt op en dooft daarna uit.
-- Verzadigingsvorm ("saturation"): "hill" (standaard) is flexibel en kan een S-curve aan. Kies "logistic" als er weinig of ruisige data is; die vorm heeft één parameter minder en is dan robuuster.
-- Ruismodel ("likelihood") op modelniveau: "normal" (standaard) voor een continue KPI (omzet). Kies "student_t" als die KPI duidelijke uitschieters/pieken heeft. Kies "poisson" of "negative_binomial" als de KPI een telling is met láge aantallen per week (bijv. 5–50 leads) — dan modelleren we op tellingen i.p.v. een normale verdeling. Gebruik "negative_binomial" i.p.v. "poisson" als de tellingen sterker schommelen dan een Poisson toelaat (overdispersie). Tellingsmodellen alleen bij hele getallen ≥ 0.
-- Trendvorm ("trend_type") op modelniveau: "linear" (standaard, één rechte trend). Kies "piecewise" als de basislijn duidelijk van richting verandert in de periode (een structurele knik/versnelling/vertraging, bijv. na een herpositionering of marktverandering) — dan mag de trend op een paar punten buigen.
-- Wees expliciet over onzekerheid. Als een kolomnaam meerdere interpretaties toelaat (bijvoorbeeld "google_sales" kan een campagnenaam zijn, geen garantie), zeg dat in "reasoning" — dit gaat naar een mens die het kan corrigeren voordat er iets draait.
-- Is er een goedgekeurde dataset, gebruik dan bij voorkeur die ene samengevoegde master-tabel als bron in plaats van de losse ruwe bestanden opnieuw te mappen.
-- Gebruik de tool "propose_model_config" pas zodra je een concreet, verdedigbaar voorstel hebt.
+Stap 2 — Modelintentie (nadat de dataset is goedgekeurd):
+Hier leg je vast WAT je over de kanalen gelooft, niet met welke getallen dat in het model
+terechtkomt. Je kiest uit vaste woorden; de rekenkern vertaalt die woorden samen met de
+gemeten eigenschappen van déze dataset (schaal van de KPI, typische weekdruk per kanaal,
+seizoensuitslag die er werkelijk in zit) naar de instellingen van het model. Dat is bewust
+zo: zo'n instelling is een uitspraak over schaal, en schaal kun je alleen meten, niet
+inschatten uit een gesprek. Jij bent goed in "kosten_tv_excl_btw zijn tv-uitgaven en tv
+werkt lang door"; jij kunt niet weten dat dat 0,34 moet zijn.
 
-Stap 2 — parameter-tuning (eigen, volwaardige stap — priors staan centraal, geen bijzaak):
-Dit is Bayesiaanse tuning, geen ridge-regressie: elk veld hieronder is een PRIOR, niet een hard minimum/maximum. Framing die je altijd aanhoudt: "wat verwacht je, en hoe zeker ben je daarvan?" — nooit "wat is de ondergrens/bovengrens?". Grondregel blijft: laat elk fijnafstem-veld helemaal WEG tenzij je een concrete, uitlegbare reden hebt — weglaten betekent "gebruik de geteste standaard, met zijn eigen ingebouwde onzekerheid". Behandel dit onderwerp-voor-onderwerp per kanaal (eerst adstock, dan saturatie, dan effectgrootte), niet alles tegelijk.
-- Adstock (na-ijl) per kanaal: functievorm ("adstock": "geometric"/"delayed") plus de priors op de vertraging — "adstock_concentration" (hoger pint de halfwaardetijd dichter bij je verwachting), "l_max" (maximale carry-over in weken, standaard 12), "expected_half_life" (verwachte halfwaardetijd, alleen bij concrete kennis), en bij "delayed" ook "delayed_peak_weeks"/"delayed_peak_sigma" (wanneer piekt het, en hoe zeker ben je).
-- Saturatie (afnemend rendement) per kanaal: functievorm ("saturation": "hill"/"logistic") plus de priors op vorm en halfverzadiging — "hill_slope_a/b" en "halfsat_a/b" bij Hill, "logistic_lam_sigma" bij logistic.
-- Coëfficiënt-prior per kanaal ("beta_sigma", HalfNormal): hoe groot verwacht je het effect, en hoe zeker ben je? Onderbouw waar mogelijk met een ROAS-benchmark uit de branche of een eerder experiment — kleiner = sterkere "dit kanaal doet weinig"-prior.
-- Kalibratie ("calibration" per kanaal, "roas"+"sd"): alleen invullen als de gebruiker een echt lift-/geo-experiment heeft. Dit trekt de schatting zacht naar het experiment; zonder experiment helemaal weglaten.
-- Baseline-priors (model-niveau, "priors"): "intercept_sigma" (baseline), "noise_sigma" (observatieruis), "trend_sigma"/"changepoint_scale" (trend), "season_sigma" (seizoen), "control_sigma" (overige variabelen). Seizoen als afgeleide feature: "seasonality_periods" (52 = jaarlijks, 26 = halfjaarlijks; null = expliciet uit — het enige veld waar null iets anders betekent dan weglaten) en "n_fourier_modes" (standaard 2; laag houden bij weinig data). Trend-flexibiliteit bij "piecewise": "n_changepoints" (standaard 6; meer = flexibeler maar gevoeliger voor divergenties).
-- Ruismodel: "student_t_nu" (lager = zwaardere staarten, > 2) alleen bij likelihood="student_t".
-- Hiërarchische priors (pooling over regio's/producten): mmm-core ondersteunt dit in de statistische kern, maar dat is NIET aangesloten op deze wizard/tool — stel dit dus niet voor als optie; als de gebruiker meerdere regio's noemt, leg uit dat één samengevoegde master-tabel wordt gebruikt.
-- Prior predictive check: vóórdat er een echte fit draait, kan de gebruiker een goedkope prior-predictive-controle draaien (geen MCMC) die laat zien wat de gekozen priors betekenen voor het KPI-bereik. Lees het resultaat als het je wordt gegeven ("Prior-predictive check" in de context) en reageer erop: sluiten de priors het werkelijke bereik in (te strak = verruimen), of zijn ze absurd breed (aanscherpen)? Adviseer expliciet vóór er compute aan een echte fit wordt gespendeerd.
+Wat je per kanaal vastlegt met de tool "propose_model_intent":
+- "unit" (VERPLICHT): waarin de kolom gemeten is — "currency" (euro's), "grp",
+  "impressions", "sendings" (bv. e-mails), "clicks". Dit is geen detail: alleen
+  euro-kanalen krijgen een rendement per euro en doen mee aan de budgetverdeling. Een
+  GRP-kolom als euro's behandelen maakt elk budgetadvies betekenisloos. Weet je het niet
+  zeker, vraag het.
+- "role": "demand_capture" (vangt bestaande koopintentie: merkzoekwoorden, marktplaatsen),
+  "brand_building" (bouwt nieuwe vraag op: tv, radio, prospecting, video) of "mixed".
+  Dit bepaalt de vórm van de na-ijl, niet de lengte.
+- "carryover": hoe lang het effect doorwerkt — "none" (zelfde week), "short" (ruim een week:
+  zoeken, retargeting), "medium" (paar weken: social, video), "long" (ruim een maand: tv,
+  radio, buitenreclame), of "unknown" als je het niet weet. "unknown" is een geldig, eerlijk
+  antwoord: het model laat de data dan zwaarder wegen dan de verwachting.
+- "strength": hoe groot je het effect inschat ten opzichte van de ándere kanalen —
+  "small"/"moderate"/"large"/"unknown". Dit verdeelt het verwachte marketingeffect over de
+  kanalen; het verhoogt het totaal niet.
+- "saturation": zit het kanaal al tegen zijn plafond aan? "far_from_saturated" (meer budget
+  zou nog goed werken), "approaching", "likely_saturated" (extra budget grotendeels
+  verspild), "unknown".
+
+Op modelniveau:
+- "kpi_type": "revenue" (continu geld), "orders", "leads" of "sessions" (hele eenheden).
+  Hieruit volgt de rekenwijze automatisch — kies dit dus op wat de KPI ís, niet op wat je
+  statistisch handig lijkt.
+- "seasonality": hoe sterk de KPI met de kalender meebeweegt, los van marketing —
+  "none"/"mild"/"strong"/"unknown".
+- "media_share_belief": welk deel van de KPI marketing als geheel drijft — "small" (~15%,
+  gevestigd merk waar reclame bovenop komt), "moderate" (~30%, de standaard), "large" (~50%),
+  "dominant" (~70%, performance-gedreven zonder eigen vraag). Dit is de zwaarstwegende
+  aanname in het hele model, dus benoem 'm expliciet in je onderbouwing. Weet je het niet,
+  laat 'm weg — dan geldt "moderate".
+- "expect_trend" en "expect_structural_break": is er een langzame drift, en is er een
+  duidelijke knik in de basislijn (herpositionering, marktomslag)?
+
+Wat je NIET doet, en waarom:
+- Je stelt geen getalswaarden voor: geen spreidingen, geen halfwaardetijden in weken, geen
+  rekeninstellingen. Die velden bestaan niet in de tool. Heb je het gevoel dat je een getal
+  nodig hebt, dan is het antwoord vrijwel altijd een ander woord uit de lijst hierboven.
+- Je vult nooit zelf een gemeten experiment in. Een gemeten rendement uit een lift- of
+  geo-test is de sterkste knop in het model — die trekt de uitkomst rechtstreeks naar een
+  getal toe. Dat mag alleen via het experimentformulier, dat de gebruiker zelf invult en
+  bevestigt. Zegt iemand terloops "TV levert volgens mij zo'n 3x op", dan is dat een
+  verwachting ("strength": "large"), geen meting.
+- Meerdere regio's of producten tegelijk modelleren zit niet in deze wizard; leg uit dat er
+  één samengevoegde weektabel wordt gebruikt.
+
+Onzekerheid benoem je expliciet. Laat een kolomnaam meerdere lezingen toe (bv. "google_sales"
+kan een campagnenaam zijn), zeg dat in "reasoning" — dat gaat naar een mens die het kan
+corrigeren voordat er iets draait.
+
+Nadat de berekening is gestart hoor je terug welke instellingen hieruit zijn afgeleid, mét de
+onderbouwing per getal. Faalt de aannamecontrole vooraf ("de aannames sluiten je eigen cijfers
+uit"), dan past bijna altijd "media_share_belief" of een "strength" niet bij de data — pas
+dát aan, niet de data.
 
 Extra ogen op de data (gebruik deze actief):
 - Per bestand krijg je naast de eerste regels ook een VOLLEDIGE-REEKS-PROFIEL (min/max/gemiddelde/sd, ontbrekende weken + langste gat, uitschieters mét week+waarde over de héle periode, en sterk gecorreleerde kolommen). De preview toont alleen de eerste rijen; het profiel ziet alles. Benoem een uitschieter of gat uit het profiel concreet (week + waarde) en stel er meteen iets voor — verwijs niet naar "misschien een piek".
@@ -124,7 +167,7 @@ Zodra er een fit is gedraaid, krijg je in de context een sectie "Laatste fit / r
 De validatiestap na een fit splitst in TWEE lagen — leid je diagnose altijd langs dat onderscheid, want de remedie verschilt:
 
 Laag 1 — sampler-betrouwbaarheid (is het wel goed gesampled? R-hat, ESS, divergenties, tracekwaliteit) → de oplossing zit in TUNING/MODELSPECIFICATIE, nooit in de data:
-- Hoge R-hat (> 1.1) en/of veel divergenties: het model is te complex voor deze data of de sampler-instellingen zijn te licht. Vereenvoudig — minder Fourier-modes (n_fourier_modes omlaag), zet trend uit of hou 'm linear i.p.v. piecewise, verkrap een te vlakke prior (kleinere beta_sigma), of laat een zwak kanaal weg. Adviseer daarnaast in tekst een hogere target_accept of meer tuning-steps (sampler-instelling, niet in de tool).
+- Hoge R-hat (> 1.1) en/of veel divergenties: het model is te complex voor deze data. Vereenvoudig via de intentie: laat een zwak of nauwelijks variërend kanaal weg, voeg twee kanalen samen die altijd samen werden ingekocht, zet "expect_structural_break" uit, of stel een lagere "media_share_belief" voor als het model duidelijk meer aan marketing probeert toe te schrijven dan de data toelaat. De rekeninstellingen zelf staan vast en zijn geen knop die jij hebt.
 - Lage effectieve steekproef (ESS): vaak een teken van sterke correlatie tussen parameters (bv. twee bijna-identieke kanalen) — vereenvoudig of combineer kanalen.
 
 Laag 2 — modelfit & plausibiliteit (is de uitkomst inhoudelijk goed? R², MAPE, dekking, decompositie, aannemelijkheid per kanaal) → de oplossing zit in DATA-INSPECTIE/-VOORBEREIDING, niet in de sampler:
@@ -245,7 +288,7 @@ const PROPOSE_PREPARE_RECIPE_TOOL: Anthropic.Tool = {
             // default", which "field absent" already means just as well (the worker's .get(key)
             // treats a missing key and an explicit null identically), so there is nothing to gain
             // from the union type here. Keep union types reserved for fields where null carries a
-            // DIFFERENT meaning than omission (see seasonality_periods in propose_model_config).
+            // DIFFERENT meaning than omission.
             date_column: { type: "string", description: "Laat weg om automatisch te detecteren." },
             columns: {
               type: "array",
@@ -386,195 +429,116 @@ const PROPOSE_PREPARE_RECIPE_TOOL: Anthropic.Tool = {
 // The full JobConfig shape (mirrors worker/mmm_worker/jobspec.py + lib/types.ts),
 // minus `sample` — the wizard applies its own default draws/tune/chains rather than
 // letting the model pick compute cost.
-const PROPOSE_CONFIG_TOOL: Anthropic.Tool = {
-  name: "propose_model_config",
+const PROPOSE_MODEL_INTENT_TOOL: Anthropic.Tool = {
+  name: "propose_model_intent",
   description:
-    "Stel een concrete modelconfiguratie voor op basis van de geziene brondata. Roep dit pas aan als je zeker genoeg bent om een compleet voorstel te doen.",
+    "Leg vast wat je over de kanalen en de KPI gelooft, in vaste woorden. De rekenkern " +
+    "vertaalt dit samen met de gemeten eigenschappen van deze dataset naar de " +
+    "modelinstellingen. Roep dit pas aan als je een compleet, verdedigbaar beeld hebt.",
   input_schema: {
     type: "object",
     properties: {
       reasoning: {
         type: "string",
         description:
-          "Korte, voor de gebruiker leesbare uitleg van de keuzes — inclusief expliciete onzekerheden/aannames die gecontroleerd moeten worden.",
+          "Korte, voor de gebruiker leesbare uitleg van je keuzes — inclusief expliciete " +
+          "onzekerheden en aannames die gecontroleerd moeten worden.",
       },
-      sources: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Korte naam voor deze bron, bv. 'weekly_data'." },
-            storage_path: { type: "string" },
-            date_column: { type: "string", description: "Laat weg om automatisch te detecteren." },
-            columns: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  name: { type: "string" },
-                  role: { type: "string", enum: ["kpi", "spend", "control"] satisfies ColumnRole[] },
-                  output_name: { type: "string", description: "Laat weg om de originele kolomnaam te gebruiken." },
-                },
-                required: ["name", "role"],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ["name", "storage_path", "columns"],
-          additionalProperties: false,
-        },
-      },
-      model: {
-        type: "object",
-        properties: {
-          kpi: { type: "string", description: "De output_name (of name) van de KPI-kolom." },
-          channels: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                channel_type: { type: "string", enum: ["intent", "brand", "generic"] satisfies ChannelType[] },
-                adstock: {
-                  type: "string",
-                  enum: ["geometric", "delayed"] satisfies AdstockType[],
-                  description: "'geometric' (standaard, digitaal) of 'delayed' (offline/merk, piek na enkele weken).",
-                },
-                saturation: {
-                  type: "string",
-                  enum: ["hill", "logistic"] satisfies SaturationType[],
-                  description: "'hill' (standaard) of 'logistic' (robuuster bij weinig/ruisige data).",
-                },
-                l_max: {
-                  type: "integer",
-                  description:
-                    "Maximale na-ijl-duur (weken) van dit kanaal. Laat weg voor de standaard (12). Verhoog voor merk/offline-kanalen met lange carry-over, verlaag voor puur intent.",
-                },
-                expected_half_life: {
-                  type: "number",
-                  description:
-                    "Verwachte halfwaardetijd (weken) van het na-ijl-effect als je daar concrete kennis over hebt; laat weg om het kanaaltype de prior te laten bepalen.",
-                },
-                priors: {
-                  type: "object",
-                  description:
-                    "Fijnafstemming van de kanaal-priors. Zet alleen een veld als je een reden hebt; laat de rest weg (= mmm-core-standaard).",
-                  properties: {
-                    beta_sigma: { type: "number", description: "HalfNormal-schaal op het kanaaleffect; kleiner = sterkere 'dit kanaal doet weinig'-prior." },
-                    adstock_concentration: { type: "number", description: "Concentratie van de retentie-prior; hoger pint de halfwaardetijd dichter bij de verwachting." },
-                    delayed_peak_weeks: { type: "number", description: "Prior-centrum voor de piek-lag (delayed adstock)." },
-                    delayed_peak_sigma: { type: "number", description: "Prior-schaal voor de piek-lag." },
-                    hill_slope_a: { type: "number", description: "Gamma(a,b)-prior op de Hill-helling — a." },
-                    hill_slope_b: { type: "number", description: "Gamma(a,b)-prior op de Hill-helling — b." },
-                    halfsat_a: { type: "number", description: "Beta(a,b)-prior op het Hill-halfverzadigingspunt — a." },
-                    halfsat_b: { type: "number", description: "Beta(a,b)-prior op het Hill-halfverzadigingspunt — b." },
-                    logistic_lam_sigma: { type: "number", description: "HalfNormal-schaal op de logistische steilheid." },
-                  } satisfies Record<keyof ChannelPriors, unknown>,
-                  additionalProperties: false,
-                },
-                calibration: {
-                  type: "object",
-                  description:
-                    "Experimenteel gemeten ROAS (uit een lift-/geo-test) om dit kanaal aan te kalibreren. Alleen invullen als de gebruiker een echt experiment heeft; anders helemaal weglaten.",
-                  properties: {
-                    roas: { type: "number", description: "Gemeten incrementele ROAS (KPI per eenheid spend), ≥ 0." },
-                    sd: { type: "number", description: "Onzekerheid (standaarddeviatie) op die meting, > 0. Kleiner = vertrouw het experiment meer." },
-                  },
-                  required: ["roas", "sd"],
-                  additionalProperties: false,
-                },
-              },
-              required: ["name", "channel_type", "adstock", "saturation"],
-              additionalProperties: false,
-            },
-          },
-          control_columns: { type: "array", items: { type: "string" } },
-          add_trend: { type: "boolean" },
-          trend_type: {
-            type: "string",
-            enum: ["linear", "piecewise"] satisfies TrendType[],
-            description: "'linear' (standaard) of 'piecewise' bij een duidelijke structurele knik in de basislijn.",
-          },
-          n_changepoints: {
-            type: "integer",
-            description:
-              "Aantal knikpunten voor een 'piecewise' trend (genegeerd bij 'linear'). Laat weg voor de standaard (6). Meer = flexibeler, maar hogere kans op overfitting/divergenties.",
-          },
-          // The one deliberately nullable/union-typed field left in these two tools: null here
-          // means "season explicitly off", which is a different instruction than omitting the
-          // field (== keep the tested default, season on at 52). Every other optional field in
-          // both tools uses plain omission instead, to stay well under Anthropic's 16-parameter
-          // cap on nullable/union-typed schema fields per request (see the comment above
-          // `date_column` in propose_prepare_recipe for the full story — we hit that limit with
-          // ~35 nullable fields and this is the fix).
-          seasonality_periods: {
-            type: ["number", "null"],
-            description:
-              "Lengte van de seizoenscyclus in weken als afgeleide feature (52 = jaarlijks, 26 = halfjaarlijks). null = seizoen expliciet uit. Laat weg voor de standaard (52, seizoen aan). Zet aan als de KPI een terugkerend patroon heeft.",
-          },
-          n_fourier_modes: {
-            type: "integer",
-            description:
-              "Aantal Fourier-paren voor de seizoensterm — hoe fijn het seizoenspatroon mag zijn. Laat weg voor de standaard (2). Meer modes = grilliger seizoen (voorzichtig bij weinig data).",
-          },
-          likelihood: {
-            type: "string",
-            enum: ["normal", "student_t", "poisson", "negative_binomial"] satisfies LikelihoodType[],
-            description:
-              "'normal' (standaard, continue KPI), 'student_t' (uitschieters), 'poisson'/'negative_binomial' (lage-aantallen tellingen zoals leads).",
-          },
-          student_t_nu: {
-            type: "number",
-            description:
-              "Vrijheidsgraden voor de student_t-likelihood (lager = zwaardere staarten / robuuster tegen uitschieters, moet > 2). Laat weg voor de standaard (4). Alleen relevant bij likelihood='student_t'.",
-          },
-          priors: {
-            type: "object",
-            description:
-              "Fijnafstemming van de basislijn-priors (intercept, trend, seizoen, controls, ruis). Zet alleen een veld met een reden; laat de rest weg (= standaard).",
-            properties: {
-              intercept_sigma: { type: "number", description: "Normal-schaal op het intercept." },
-              trend_sigma: { type: "number", description: "Normal-schaal op de trendhelling." },
-              season_sigma: { type: "number", description: "Normal-schaal op elke Fourier-seizoenscoëfficiënt." },
-              control_sigma: { type: "number", description: "Normal-schaal op elke control-coëfficiënt." },
-              noise_sigma: { type: "number", description: "HalfNormal-schaal op de observatieruis." },
-              changepoint_scale: { type: "number", description: "Laplace-schaal per knikpunt bij piecewise trend; kleiner = stuggere trend." },
-            } satisfies Record<keyof BaselinePriors, unknown>,
-            additionalProperties: false,
-          },
-        },
-        required: ["kpi", "channels", "control_columns", "add_trend", "trend_type", "seasonality_periods", "likelihood"],
-        additionalProperties: false,
-      },
-      event_dummies: {
-        type: "array",
+      kpi: { type: "string", description: "De kolomnaam van de KPI in de goedgekeurde dataset." },
+      kpi_type: {
+        type: "string",
+        enum: ["revenue", "orders", "leads", "sessions"] satisfies KpiType[],
         description:
-          "0/1-controlekolommen voor specifieke ISO-weken met een duidelijke, in de data zichtbare uitschieter (storing, eenmalige actie). Leeg laten als er geen zijn.",
+          "Wat de KPI telt. Kies op wat het IS: 'revenue' voor continu geld, de andere drie " +
+          "voor hele eenheden. Hieruit volgt de rekenwijze automatisch.",
+      },
+      channels: {
+        type: "array",
         items: {
           type: "object",
           properties: {
-            name: { type: "string", description: "Kolomnaam, bv. 'dummy_2025w45'." },
-            weeks: {
-              type: "array",
+            name: { type: "string", description: "Kolomnaam van het kanaal." },
+            unit: {
+              type: "string",
+              enum: ["currency", "impressions", "grp", "sendings", "clicks"] satisfies ChannelUnit[],
               description:
-                "Lijst van [iso_jaar, iso_weeknummer]-paren waarop deze dummy 1 is (elk paar exact 2 gehele getallen).",
-              items: { type: "array", items: { type: "integer" } },
+                "Waarin de kolom gemeten is. Alleen 'currency' krijgt een rendement per euro " +
+                "en doet mee aan de budgetverdeling — een GRP-kolom als euro's behandelen " +
+                "maakt elk budgetadvies betekenisloos. Weet je het niet zeker, vraag het.",
+            },
+            role: {
+              type: "string",
+              enum: ["demand_capture", "brand_building", "mixed"] satisfies ChannelRole[],
+              description:
+                "'demand_capture' vangt bestaande koopintentie (merkzoekwoorden, marktplaatsen); " +
+                "'brand_building' bouwt nieuwe vraag op (tv, radio, prospecting). Bepaalt de " +
+                "vorm van de na-ijl.",
+            },
+            carryover: {
+              type: "string",
+              enum: ["none", "short", "medium", "long", "unknown"] satisfies Carryover[],
+              description:
+                "Hoe lang het effect doorwerkt. 'unknown' is een geldig, eerlijk antwoord: de " +
+                "data weegt dan zwaarder dan de verwachting.",
+            },
+            strength: {
+              type: "string",
+              enum: ["small", "moderate", "large", "unknown"] satisfies Strength[],
+              description:
+                "Hoe groot je het effect inschat TEN OPZICHTE VAN de andere kanalen. Dit " +
+                "verdeelt het verwachte marketingeffect; het verhoogt het totaal niet.",
+            },
+            saturation: {
+              type: "string",
+              enum: [
+                "far_from_saturated",
+                "approaching",
+                "likely_saturated",
+                "unknown",
+              ] satisfies SaturationBelief[],
+              description: "Zit het kanaal al tegen zijn plafond aan?",
             },
           },
-          required: ["name", "weeks"],
+          required: ["name", "unit", "role", "carryover", "strength", "saturation"],
           additionalProperties: false,
         },
+      },
+      control_columns: {
+        type: "array",
+        items: { type: "string" },
+        description: "Overige verklarende variabelen (prijs, weer) zonder eigen kanaaleffect.",
+      },
+      seasonality: {
+        type: "string",
+        enum: ["none", "mild", "strong", "unknown"] satisfies SeasonalityBelief[],
+        description:
+          "Hoe sterk de KPI met de kalender meebeweegt, LOS van marketing. Onderschat dit " +
+          "niet bij een seizoensbedrijf: als het seizoen te krap staat en de mediadruk " +
+          "tegelijk piekt, belandt de seizoenspiek bij de kanalen.",
+      },
+      media_share_belief: {
+        type: "string",
+        enum: ["small", "moderate", "large", "dominant"] satisfies MediaShare[],
+        description:
+          "Welk deel van de KPI marketing als geheel drijft: 'small' ~15% (gevestigd merk), " +
+          "'moderate' ~30% (standaard), 'large' ~50%, 'dominant' ~70% (geen eigen vraag). De " +
+          "zwaarstwegende aanname in het model — benoem 'm in je onderbouwing. Weet je het " +
+          "niet, laat 'm weg.",
+      },
+      expect_trend: { type: "boolean", description: "Is er een langzame drift in de basislijn?" },
+      expect_structural_break: {
+        type: "boolean",
+        description: "Is er een duidelijke knik (herpositionering, marktomslag)?",
       },
     },
-    required: ["reasoning", "sources", "model", "event_dummies"],
+    required: ["reasoning", "kpi", "kpi_type", "channels", "control_columns", "seasonality"],
     additionalProperties: false,
   },
-  // Not `strict`: strict mode requires every property to be listed in `required` (its whole
-  // validation guarantee depends on that), which is incompatible with the optional (omit-to-
-  // default) tuning fields above — and those fields being genuinely optional rather than
-  // nullable-and-required is exactly what keeps this tool under Anthropic's 16-parameter cap
-  // on nullable/union-typed schema fields per request. mmm-core/jobspec.py validates every
-  // field at run time regardless, and the builder reviews the proposed config before it runs.
+  // Not `strict`: strict mode requires every property to be listed in `required`, which is
+  // incompatible with the optional belief fields above. It matters less here than it did for
+  // the old config tool, because there is nothing numeric left to get wrong — every field is
+  // a closed enum, mmm_core.model.intent validates them again server-side, and the priors
+  // themselves are derived from measured data rather than from anything in this payload.
 };
 
 export function buildRequest(
@@ -597,7 +561,7 @@ export function buildRequest(
     max_tokens: 4096,
     thinking: { type: "adaptive" },
     output_config: { effort: "medium" },
-    tools: [PROPOSE_PREPARE_RECIPE_TOOL, PROPOSE_CONFIG_TOOL, RECORD_CONTEXT_TOOL],
+    tools: [PROPOSE_PREPARE_RECIPE_TOOL, PROPOSE_MODEL_INTENT_TOOL, RECORD_CONTEXT_TOOL],
     // Cache breakpoints on the two stable blocks: the fixed instructions (byte-identical
     // for everyone, forever) and the per-project uploaded-data context (stable across a
     // session until new data is uploaded). The dataset and fit-results blocks are placed

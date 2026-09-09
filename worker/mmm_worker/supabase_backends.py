@@ -142,6 +142,27 @@ class SupabaseRunStore(RunStore):
             .data
         )
 
+    def save_resolved_spec(
+        self, configuration_id: str, *, spec: dict, spec_hash: str, provenance: list, issues: list
+    ) -> None:
+        self._table("model_configurations").update(
+            {
+                "resolved_spec": spec,
+                "spec_sha256": spec_hash,
+                "provenance": provenance,
+                "issues": issues,
+            }
+        ).eq("id", configuration_id).execute()
+
+    def record_prior_gate(self, configuration_id: str, *, review: dict, passed: bool) -> None:
+        self._table("model_configurations").update(
+            {
+                "prior_predictive": review,
+                "prior_gate_passed": passed,
+                "prior_gate_checked_at": "now()",
+            }
+        ).eq("id", configuration_id).execute()
+
     def save_diagnostics(self, run_id: str, diagnostics: dict) -> None:
         self._table("model_diagnostics").upsert(
             {"model_run_id": run_id, **diagnostics}, on_conflict="model_run_id"

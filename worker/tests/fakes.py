@@ -30,6 +30,8 @@ class FakeRunStore:
         self.diagnostics: dict | None = None
         self.validation: dict | None = None
         self.results: dict | None = None
+        self.resolved: dict | None = None
+        self.prior_gate: dict | None = None
 
     # --- lifecycle ---
     def get_run(self, run_id: str) -> dict:
@@ -82,6 +84,14 @@ class FakeRunStore:
 
     def get_dataset_version(self, dataset_version_id: str) -> dict:
         return self.dataset
+
+    def save_resolved_spec(self, configuration_id, *, spec, spec_hash, provenance, issues) -> None:
+        self.configuration["resolved_spec"] = spec
+        self.configuration["spec_sha256"] = spec_hash
+        self.resolved = {"spec": spec, "provenance": provenance, "issues": issues}
+
+    def record_prior_gate(self, configuration_id, *, review, passed) -> None:
+        self.prior_gate = {"review": review, "passed": passed}
 
     # --- writes ---
     def save_diagnostics(self, run_id: str, diagnostics: dict) -> None:
@@ -239,5 +249,23 @@ def make_stub_evidence(holdout: float | None = 0.12, placebo: float | None = 0.0
     return evidence
 
 
-def no_prior_gate(data, config) -> None:
+def no_prior_gate(data, config) -> dict:
     """A prior gate that always passes, for tests about other things."""
+    return {"admits_observed": True, "not_absurdly_wide": True, "ok": True}
+
+
+def make_stub_resolver(config=None):
+    """A resolver that returns a fixed configuration without touching mmm-core's priors."""
+    from mmm_core.model import ChannelConfig, ChannelUnit, ModelConfig
+
+    resolved = config or ModelConfig(
+        kpi="revenue", channels=(ChannelConfig("search", unit=ChannelUnit.CURRENCY),)
+    )
+    calls: list[dict] = []
+
+    def resolve(configuration, data):
+        calls.append({"n_rows": len(data)})
+        return resolved, {"kpi": resolved.kpi}, "derived-hash", [], []
+
+    resolve.calls = calls
+    return resolve

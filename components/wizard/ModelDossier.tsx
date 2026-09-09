@@ -3,16 +3,19 @@
 // Het read-only "model-dossier" rechts: een levende spiegel van alles wat het model tot nu
 // toe WEET. Puur een render van bestaande DB-staat (bronnen, dataset, config, context) —
 // kost geen tokens. Hier gebeurt geen bewerking; dat loopt allemaal via de chat links.
+//
+// Het paneel krijgt de hele projectmomentopname binnen in plaats van tien losse props: run,
+// resultaat en oordeel horen bij elkaar, en dit paneel mag een resultaat nooit tonen zonder
+// het oordeel dat erbij hoort.
 
 import { Check, Circle, Dot } from "lucide-react";
 import { useWizardChatOptional } from "@/components/WizardChatContext";
-import type {
-  BusinessContextNote,
-  ColumnRole,
-  Dataset,
-  Job,
-  ModelRun,
-  SourceFile,
+import {
+  RUN_STATE_LABEL,
+  VALIDATION_LEVEL_LABEL,
+  type ColumnRole,
+  type DatasetStatus,
+  type ProjectSnapshot,
 } from "@/lib/types";
 import type { WizardPhase } from "@/lib/wizard/phase";
 import { PHASE_STEPS, stepIndexForPhase } from "@/lib/wizard/script";
@@ -21,6 +24,13 @@ const ROLE_LABEL: Record<ColumnRole, string> = {
   kpi: "KPI",
   spend: "Kanaal",
   control: "Control",
+};
+
+const DATASET_STATUS_LABEL: Record<DatasetStatus, string> = {
+  queued: "in de wachtrij",
+  building: "wordt samengevoegd",
+  ready: "klaar voor beoordeling",
+  failed: "mislukt",
 };
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -41,32 +51,12 @@ function RolePill({ role }: { role: ColumnRole }) {
   return <span className={`rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${cls[role]}`}>{ROLE_LABEL[role]}</span>;
 }
 
-export function ModelDossier({
-  phase,
-  projectName,
-  clientCompany,
-  sources,
-  dataset,
-  jobs,
-  runs,
-  industry,
-  businessNotes,
-  companyDescription,
-}: {
-  phase: WizardPhase;
-  projectName: string;
-  clientCompany: string | null;
-  sources: SourceFile[];
-  dataset: Dataset | null;
-  jobs: Job[];
-  runs: ModelRun[];
-  industry: string | null;
-  businessNotes: BusinessContextNote[];
-  companyDescription: string | null;
-}) {
+export function ModelDossier({ phase, snapshot }: { phase: WizardPhase; snapshot: ProjectSnapshot }) {
   const activeStep = stepIndexForPhase(phase);
   const chat = useWizardChatOptional(); // null op het klant-dashboard, waar dit paneel niet gerenderd wordt
-  const source = sources[0] ?? null;
+  const { project, context } = snapshot;
+  const source = snapshot.sources[0] ?? null;
+  const dataset = snapshot.dataset;
   const roles = dataset?.column_roles ?? null;
   const byRole = (r: ColumnRole) => (roles ? Object.entries(roles).filter(([, v]) => v === r).map(([k]) => k) : []);
   const kpi = byRole("kpi")[0] ?? null;
@@ -75,13 +65,16 @@ export function ModelDossier({
   const recipe = dataset?.recipe ?? null;
   const events = recipe?.event_dummies ?? [];
   const features = recipe?.features ?? [];
-  const latestRun = runs[0] ?? null;
+  const industry = context?.industry ?? null;
+  const companyDescription = context?.description ?? null;
+  const businessNotes = context?.notes ?? [];
+  const latest = snapshot.runs[0] ?? null;
 
   return (
     <div className="flex h-full flex-col gap-5 overflow-y-auto p-5">
       <div>
-        <h2 className="text-sm font-semibold text-fg">{projectName}</h2>
-        {clientCompany && <p className="text-xs text-fg-muted">{clientCompany}</p>}
+        <h2 className="text-sm font-semibold text-fg">{project.name}</h2>
+        {project.client_company && <p className="text-xs text-fg-muted">{project.client_company}</p>}
       </div>
 
       {/* Voortgang — welke stap ben je? Een afgeronde stap met een backTarget is klikbaar:
@@ -137,16 +130,17 @@ export function ModelDossier({
         )}
       </Section>
 
-      {/* Dataset — venster + kolomrollen */}
+      {/* Dataset — venster + status. "Goedgekeurd" is geen status maar een datum: alleen een
+          goedgekeurde versie mag gemodelleerd worden, dus die staat er los bij. */}
       {dataset && (
-        <Section title="Dataset">
+        <Section title={`Dataset (v${dataset.version_no})`}>
           {dataset.window_start && dataset.window_end && (
             <p className="text-xs text-fg-muted">
               {dataset.n_weeks ?? "?"} weken · {dataset.window_start} t/m {dataset.window_end}
             </p>
           )}
           <p className="text-[11px] text-fg-faint">
-            Status: {dataset.status === "approved" ? "goedgekeurd" : dataset.status}
+            Status: {dataset.approved_at ? "goedgekeurd" : DATASET_STATUS_LABEL[dataset.status]}
           </p>
         </Section>
       )}
@@ -167,6 +161,9 @@ export function ModelDossier({
                 {channels.map((c) => (
                   <li key={c} className="text-xs text-fg">
                     {c}
+                    {dataset?.column_units?.[c] ? (
+                      <span className="text-fg-faint"> · {dataset.column_units[c]}</span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -210,17 +207,24 @@ export function ModelDossier({
             <p key={i} className="text-xs text-fg-muted">
               • {n.fact}
               {n.relates_to ? ` (${n.relates_to})` : ""}
+              {n.source === "ai_inferred" ? <span className="text-fg-faint"> · afgeleid</span> : null}
             </p>
           ))}
         </Section>
       )}
 
-      {/* Laatste resultaat */}
-      {latestRun && (
-        <Section title="Laatste resultaat">
+      {/* Laatste berekening — altijd mét het oordeel erbij. Een datum zonder oordeel zou
+          suggereren dat er een bruikbaar resultaat ligt; dat is precies wat we niet willen. */}
+      {latest && (
+        <Section title="Laatste berekening">
           <p className="text-xs text-fg-muted">
-            {new Date(latestRun.created_at).toLocaleDateString("nl-NL")}
-            {latestRun.is_published ? " · gepubliceerd" : ""}
+            {new Date(latest.run.created_at).toLocaleDateString("nl-NL")}
+            {latest.result?.is_published ? " · gepubliceerd" : ""}
+          </p>
+          <p className="text-[11px] text-fg-faint">
+            {latest.validation
+              ? VALIDATION_LEVEL_LABEL[latest.validation.level]
+              : RUN_STATE_LABEL[latest.run.state]}
           </p>
         </Section>
       )}

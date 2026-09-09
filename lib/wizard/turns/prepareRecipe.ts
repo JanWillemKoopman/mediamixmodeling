@@ -7,7 +7,7 @@
 
 import { humanizeError } from "@/lib/humanizeMessage";
 import { matchOption, type MenuOption } from "@/lib/wizard/questions";
-import type { ColumnRole, PrepareRecipe, SourceConfig } from "@/lib/types";
+import type { ColumnRole, DatasetRecipe } from "@/lib/types";
 import type { TurnEnv, TurnReplyResult } from "@/lib/wizard/turns/types";
 
 const SKIP_OPTION: MenuOption = { key: "skip", label: "nee", synonyms: ["nee", "geen", "niets", "skip", "nvt"] };
@@ -26,7 +26,7 @@ export function intro(env: TurnEnv): string {
   );
 }
 
-function buildDefaultRecipe(env: TurnEnv): PrepareRecipe | null {
+function buildDefaultRecipe(env: TurnEnv): DatasetRecipe | null {
   const source = env.source;
   const cols = source?.mapping?.columns ?? [];
   const dateCol = cols.find((c) => c.role === "date")?.name;
@@ -34,7 +34,7 @@ function buildDefaultRecipe(env: TurnEnv): PrepareRecipe | null {
   const spendCols = cols.filter((c) => c.role === "spend").map((c) => c.name);
   const controlCols = cols.filter((c) => c.role === "control").map((c) => c.name);
   if (!source || !dateCol || !kpiCol || spendCols.length === 0) return null;
-  const columns: SourceConfig["columns"] = [
+  const columns: DatasetRecipe["sources"][number]["columns"] = [
     { name: kpiCol, role: "kpi" },
     ...spendCols.map((name) => ({ name, role: "spend" as ColumnRole })),
     ...controlCols.map((name) => ({ name, role: "control" as ColumnRole })),
@@ -42,8 +42,10 @@ function buildDefaultRecipe(env: TurnEnv): PrepareRecipe | null {
   return {
     sources: [
       {
+        // The file is named by its ROW ID, never by its storage path. The server resolves
+        // the path from this project's own rows, so a recipe cannot reach a file elsewhere.
+        source_file_id: source.id,
         name: source.name.replace(/\.[^.]+$/, ""),
-        storage_path: source.storage_path,
         date_column: dateCol,
         columns,
       },
@@ -54,7 +56,7 @@ function buildDefaultRecipe(env: TurnEnv): PrepareRecipe | null {
 // Fase "prepare_failed" hergebruikt dit hele formulier (zelfde vraag, zelfde resolve) —
 // alleen de intro krijgt de foutmelding erboven, zoals de oude kaart dat ook deed.
 export function introFailed(env: TurnEnv): string {
-  const error = env.dataset?.error ?? "Onbekende fout bij het samenvoegen.";
+  const error = env.dataset?.error_message ?? "Onbekende fout bij het samenvoegen.";
   return `Het samenvoegen is helaas niet gelukt: ${error}\n\n${intro(env)}`;
 }
 

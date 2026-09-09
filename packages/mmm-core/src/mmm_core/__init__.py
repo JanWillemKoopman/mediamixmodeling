@@ -7,6 +7,9 @@ in later steps and get their own subpackages.
 
 from mmm_core.ingestion import (
     BuildResult,
+    ColumnFinding,
+    ColumnRole,
+    ColumnValidation,
     ColumnSpec,
     EventDummySpec,
     FeatureSpec,
@@ -20,7 +23,8 @@ from mmm_core.ingestion import (
     build_event_dummy,
     build_feature,
     build_master_dataset,
-    build_master_datasets_by_region,
+    looks_like_identifier,
+    validate_columns,
 )
 from mmm_core.transforms import (
     adstock_weights,
@@ -36,6 +40,11 @@ from mmm_core.transforms import (
 
 __all__ = [
     "BuildResult",
+    "ColumnFinding",
+    "ColumnRole",
+    "ColumnValidation",
+    "looks_like_identifier",
+    "validate_columns",
     "ColumnSpec",
     "EventDummySpec",
     "FeatureSpec",
@@ -49,7 +58,6 @@ __all__ = [
     "build_event_dummy",
     "build_feature",
     "build_master_dataset",
-    "build_master_datasets_by_region",
     "adstock_weights",
     "alpha_from_half_life",
     "delayed_adstock",

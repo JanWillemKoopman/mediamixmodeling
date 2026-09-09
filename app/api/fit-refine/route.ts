@@ -1,40 +1,37 @@
 import { NextResponse } from "next/server";
-import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 import Anthropic from "@anthropic-ai/sdk";
 import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildRequest } from "@/lib/anthropic/architect";
-import { MAX_CONCURRENT_JOBS, hasJobCapacity, nudgeModalEnqueue } from "@/lib/jobs";
-import { isHierSummary } from "@/lib/types";
+import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 import type { ArchitectFitContext } from "@/lib/anthropic/fitContext";
 import type { ArchitectDatasetContext } from "@/lib/anthropic/datasetContext";
 import type {
   DataInspection,
-  Dataset,
+  DatasetVersion,
   FitSummary,
-  JobConfig,
-  JobStatus,
+  ModelIntent,
   ProjectContext,
+  RunErrorCode,
   SourceFile,
 } from "@/lib/types";
 
-// Agentic auto-verfijn voor de FIT-lus — de tegenhanger van /api/prepare-auto, maar dan
-// voor de dure stap. Eén aanroep = één ronde: de architect beoordeelt de laatste fit
-// (mislukt, of kwaliteitspoort warn/fail), stelt een gecorrigeerde config voor en start
-// die als nieuwe fit. De lus zelf wordt client-side aangedreven (de fits-stap roept dit
-// endpoint opnieuw aan zodra de nieuwe fit klaar is, tot de poort op "pass" staat of de
-// rondelimiet is bereikt) — een fit duurt minuten, dus server-side wachten past niet in
-// een serverless-tijdbudget. Mens-in-de-lus blijft: elke ronde is zichtbaar in de chat,
-// de bouwer kan de cyclus elk moment stoppen, en publiceren blijft een handmatige actie.
+// Ask the architect to diagnose the last run and PROPOSE a corrected intent.
+//
+// It does not start anything. In v1 this endpoint took the language model's tool output and
+// inserted it straight into the job queue — priors, calibration and storage path included —
+// while its own comment claimed there was a human in the loop. There was not: the only limit
+// was a round counter read from `body.round`, which the client supplies, so sending
+// `round: 1` every time bypassed it entirely and each round cost a full Modal fit.
+//
+// Now the proposal comes back to the user, who applies it the same way they apply any other
+// proposal. The AI still does the hard part — reading the diagnostics and working out what
+// to change — it just does not get to spend compute on its own conclusion.
 export const maxDuration = 120;
 
-// Harde bovengrens, ook al stuurt de client een hoger rondenummer mee: elke ronde kost
-// een volledige Modal-fit, dus dit is de duurste lus in de app.
-const MAX_FIT_REFINE_ROUNDS = 3;
-
-function gateVerdict(summary: FitSummary): "pass" | "warn" | "fail" | null {
-  return summary.quality_gate?.verdict ?? null;
-}
+// How many diagnose-and-propose rounds are worth doing before the answer is "this needs a
+// person". Counted from the runs in the database, not from anything the client sends.
+const MAX_ROUNDS = 3;
 
 async function handlePost(request: Request) {
   const viewer = await getViewer();
@@ -44,204 +41,185 @@ async function handlePost(request: Request) {
 
   const body = await request.json().catch(() => null);
   const projectId: string | undefined = body?.project_id;
-  const round: number = typeof body?.round === "number" ? body.round : 1;
   if (!projectId) {
     return NextResponse.json({ error: "project_id is verplicht" }, { status: 400 });
-  }
-  if (round > MAX_FIT_REFINE_ROUNDS) {
-    return NextResponse.json({
-      status: "exhausted",
-      message: `De rondelimiet (${MAX_FIT_REFINE_ROUNDS}) is bereikt. Bekijk de laatste run en verfijn verder via de chat.`,
-    });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY is niet geconfigureerd op de server." }, { status: 503 });
+    return NextResponse.json(
+      { error: "ANTHROPIC_API_KEY is niet geconfigureerd op de server." },
+      { status: 503 },
+    );
   }
 
   const supabase = createClient();
 
-  // Dezelfde context als de chat-architect ziet, zodat de correctie op alles is gebaseerd
-  // (profielen, inspectie, zakelijke context, run-historie) — niet alleen de foutmelding.
-  const [
-    { data: sources },
-    { data: runRows },
-    { data: latestFitJob },
-    { data: latestDataset },
-    { data: projectContext },
-    { data: latestInspection },
-  ] = await Promise.all([
-    supabase
-      .schema("mmm")
-      .from("source_files")
-      .select("id, project_id, name, storage_path, role_hint, preview, profile, mapping, created_at")
-      .eq("project_id", projectId)
-      .order("created_at"),
-    supabase
-      .schema("mmm")
-      .from("model_runs")
-      .select("summary, created_at")
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: false })
-      .limit(4),
-    supabase
-      .schema("mmm")
-      .from("jobs")
-      .select("status, error, config, created_at")
-      .eq("project_id", projectId)
-      .eq("type", "fit")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .schema("mmm")
-      .from("datasets")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase.schema("mmm").from("project_context").select("*").eq("project_id", projectId).maybeSingle(),
-    supabase
-      .schema("mmm")
-      .from("data_inspections")
-      .select("*")
-      .eq("project_id", projectId)
-      .eq("status", "done")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const [{ data: sources }, { data: runs }, { data: dataset }, { data: projectContext }, { data: inspection }] =
+    await Promise.all([
+      supabase
+        .schema("mmm")
+        .from("source_files")
+        .select("id, project_id, name, storage_path, preview, profile, mapping, created_at")
+        .eq("project_id", projectId)
+        .order("created_at"),
+      supabase
+        .schema("mmm")
+        .from("model_runs")
+        .select("id, state, error_code, error_message, created_at, finished_at")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false })
+        .limit(MAX_ROUNDS + 2),
+      supabase
+        .schema("mmm")
+        .from("dataset_versions")
+        .select("*")
+        .eq("project_id", projectId)
+        .not("approved_at", "is", null)
+        .maybeSingle(),
+      supabase.schema("mmm").from("project_context").select("*").eq("project_id", projectId).maybeSingle(),
+      supabase
+        .schema("mmm")
+        .from("data_inspections")
+        .select("*")
+        .eq("project_id", projectId)
+        .eq("status", "done")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
-  if (!latestFitJob) {
-    return NextResponse.json({ error: "Er is nog geen fit om te verbeteren." }, { status: 400 });
+  const runList = runs ?? [];
+  const latestRun = runList[0];
+  if (!latestRun) {
+    return NextResponse.json({ error: "Er is nog geen berekening om te verbeteren." }, { status: 400 });
   }
-  const jobStatus = latestFitJob.status as JobStatus;
-  if (jobStatus === "queued" || jobStatus === "running") {
-    return NextResponse.json({ status: "waiting", message: "Er draait nog een berekening; wacht tot die klaar is." });
-  }
-
-  const latestRun = runRows?.[0] ?? null;
-  const latestSummary = latestRun && !isHierSummary(latestRun.summary) ? (latestRun.summary as FitSummary) : null;
-
-  // Klaar? Een geslaagde fit met kwaliteitspoort "pass" (of zonder poort) hoeft niet verder.
-  const jobSucceededAfterRun =
-    jobStatus === "succeeded" && latestRun != null && new Date(latestRun.created_at) >= new Date(latestFitJob.created_at);
-  if (jobSucceededAfterRun && latestSummary && gateVerdict(latestSummary) !== "warn" && gateVerdict(latestSummary) !== "fail") {
+  if (!["completed", "failed", "cancelled"].includes(latestRun.state)) {
     return NextResponse.json({
-      status: "done",
-      message: "De laatste berekening is geslaagd en de kwaliteitscontrole staat niet op warn/fail — niets te verbeteren. Beoordeel en publiceer wanneer je tevreden bent.",
+      status: "waiting",
+      message: "Er loopt nog een berekening; wacht tot die klaar is.",
     });
   }
 
-  if (!(await hasJobCapacity(supabase))) {
-    return NextResponse.json(
-      { error: `Er draaien (of wachten) al ${MAX_CONCURRENT_JOBS} taken; probeer het zo weer.` },
-      { status: 409 },
-    );
+  // The round count comes from the database, so it cannot be reset by the caller.
+  const finishedRounds = runList.filter((r) => r.state === "completed" || r.state === "failed").length;
+  if (finishedRounds >= MAX_ROUNDS) {
+    return NextResponse.json({
+      status: "exhausted",
+      message:
+        `Er zijn al ${finishedRounds} berekeningen gedaan voor dit project. Verder verfijnen ` +
+        `heeft weinig zin zonder eerst naar de data te kijken — bespreek het in de chat.`,
+    });
+  }
+
+  const { data: result } = await supabase
+    .schema("mmm")
+    .from("model_results")
+    .select("summary")
+    .eq("model_run_id", latestRun.id)
+    .maybeSingle();
+  const { data: validation } = await supabase
+    .schema("mmm")
+    .from("model_validations")
+    .select("*")
+    .eq("model_run_id", latestRun.id)
+    .maybeSingle();
+
+  const level = validation?.level as string | undefined;
+  if (latestRun.state === "completed" && level === "usable_for_decisions") {
+    return NextResponse.json({
+      status: "done",
+      message:
+        "De laatste berekening is bruikbaar om budget op te sturen — er valt niets te " +
+        "verbeteren. Beoordeel en publiceer wanneer je tevreden bent.",
+    });
   }
 
   const fit: ArchitectFitContext = {
-    latestRun: latestRun
-      ? { summary: latestRun.summary as FitSummary, created_at: latestRun.created_at as string }
+    latestRun: result
+      ? { summary: result.summary as FitSummary, created_at: latestRun.created_at as string }
       : null,
-    latestJob: {
-      status: jobStatus,
-      error: (latestFitJob.error as string | null) ?? null,
-      config: latestFitJob.config as JobConfig,
-      created_at: latestFitJob.created_at as string,
+    previousRuns: [],
+    latestRunState: {
+      state: latestRun.state as string,
+      error_code: (latestRun.error_code as RunErrorCode | null) ?? null,
+      error_message: (latestRun.error_message as string | null) ?? null,
+      created_at: latestRun.created_at as string,
     },
-    previousRuns: (runRows ?? [])
-      .slice(1)
-      .filter((r) => !isHierSummary(r.summary))
-      .map((r) => ({ summary: r.summary as FitSummary, created_at: r.created_at as string })),
+    validation: (validation as never) ?? null,
   };
-  const dataset: ArchitectDatasetContext = { latestDataset: (latestDataset as Dataset | null) ?? null };
-  const sourceFiles = (sources ?? []) as SourceFile[];
+  const datasetContext: ArchitectDatasetContext = {
+    latestDataset: (dataset as DatasetVersion | null) ?? null,
+  };
+  const sourceFiles = (sources ?? []) as unknown as SourceFile[];
   const previews = sourceFiles.map((f) => ({ file: f, preview: f.preview ?? null }));
-  const businessContext = (projectContext as ProjectContext | null) ?? null;
-  const inspection = (latestInspection as DataInspection | null) ?? null;
 
-  const autoPrompt =
-    `Automatische verbetercyclus, ronde ${round} van maximaal ${MAX_FIT_REFINE_ROUNDS}. ` +
-    (jobStatus === "failed"
-      ? "De laatste fit is MISLUKT. Diagnosticeer de oorzaak aan de hand van de foutmelding en roep propose_model_config aan met een gecorrigeerde configuratie die dit oplost."
-      : "De laatste fit is afgerond maar de kwaliteitspoort staat op warn/fail. Diagnosticeer wat er mis is en roep propose_model_config aan met een gericht verbeterde configuratie — verander alleen wat de diagnose aanwijst en leg in reasoning uit wat je veranderde en waarom.") +
-    " Als je géén verantwoorde verbetering ziet (bijvoorbeeld omdat het probleem in de data zit), roep dan geen tool aan maar leg dat uit.";
-
-  const history: Anthropic.MessageParam[] = [{ role: "user", content: autoPrompt }];
+  const prompt =
+    latestRun.state === "failed"
+      ? "De laatste berekening is MISLUKT. Lees de foutmelding, benoem de oorzaak in gewone " +
+        "taal en roep propose_model_intent aan met een aangepaste intentie die dit oplost. " +
+        "Zie je geen verantwoorde aanpassing (bijvoorbeeld omdat het probleem in de data " +
+        "zit), roep dan geen tool aan maar leg uit wat de gebruiker moet doen."
+      : "De laatste berekening is afgerond maar haalt de bruikbaarheidsdrempel niet. Lees de " +
+        "beoordeling, benoem per punt wat eraan schort, en roep propose_model_intent aan met " +
+        "een gericht aangepaste intentie — verander alleen wat de diagnose aanwijst en leg in " +
+        "reasoning uit wat je veranderde en waarom. Is het probleem niet met de intentie op te " +
+        "lossen, zeg dat dan en verwijs naar de stap die het wél kan oplossen.";
 
   const client = new Anthropic({ apiKey });
   let response: Anthropic.Message;
   try {
     response = await client.messages.create(
-      buildRequest({ sources: previews, dataset, fit, businessContext, inspection }, history),
+      buildRequest(
+        {
+          sources: previews,
+          dataset: datasetContext,
+          fit,
+          businessContext: (projectContext as ProjectContext | null) ?? null,
+          inspection: (inspection as DataInspection | null) ?? null,
+        },
+        [{ role: "user", content: prompt }],
+      ),
     );
   } catch (err) {
     return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });
   }
 
   const toolUse = response.content.find(
-    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "propose_model_config",
+    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "propose_model_intent",
   );
-  const replyText = response.content
+  const reasoning = response.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
-    .join("\n\n");
+    .join("\n\n")
+    .trim();
 
-  // De hele ronde is zichtbaar in de projectchat, zodat de bouwer het spoor kan volgen en
-  // op elk moment kan ingrijpen — het automatische karakter mag geen zwarte doos worden.
-  const rowsToInsert: { project_id: string; role: "user" | "assistant"; content: unknown; created_by: string }[] = [
-    { project_id: projectId, role: "user", content: [{ type: "text", text: autoPrompt }], created_by: viewer.id },
+  // The whole round is visible in the project chat, so the trail is followable and the
+  // builder can step in at any point.
+  await supabase.schema("mmm").from("chat_messages").insert([
+    { project_id: projectId, role: "user", content: [{ type: "text", text: prompt }], created_by: viewer.id },
     { project_id: projectId, role: "assistant", content: response.content, created_by: viewer.id },
-  ];
+  ]);
 
   if (!toolUse) {
-    await supabase.schema("mmm").from("chat_messages").insert(rowsToInsert);
     return NextResponse.json({
-      status: "stopped",
-      message: replyText || "De AI zag geen verantwoorde automatische verbetering.",
+      status: "no_proposal",
+      message: reasoning || "De AI zag geen verantwoorde aanpassing van de modelinstellingen.",
     });
   }
 
-  // Config uit de tool-call → nieuwe fit-job, exact zoals /api/jobs dat doet.
-  const proposal = toolUse.input as { sources: unknown; model: unknown; event_dummies?: unknown; reasoning?: string };
-  const config = { sources: proposal.sources, model: proposal.model, event_dummies: proposal.event_dummies ?? [] };
+  const { reasoning: proposalReasoning, ...intent } = toolUse.input as {
+    reasoning?: string;
+  } & ModelIntent;
 
-  const { data: job, error: jobErr } = await supabase
-    .schema("mmm")
-    .from("jobs")
-    .insert({ project_id: projectId, type: "fit", config, created_by: viewer.id })
-    .select("id")
-    .single();
-
-  rowsToInsert.push({
-    project_id: projectId,
-    role: "user",
-    content: [
-      {
-        type: "tool_result",
-        tool_use_id: toolUse.id,
-        content: jobErr
-          ? `De gecorrigeerde configuratie kon niet worden gestart: ${jobErr.message}`
-          : "De gecorrigeerde configuratie is automatisch gestart als nieuwe fit.",
-      },
-    ],
-    created_by: viewer.id,
-  });
-  await supabase.schema("mmm").from("chat_messages").insert(rowsToInsert);
-
-  if (jobErr) {
-    return NextResponse.json({ error: jobErr.message }, { status: 400 });
-  }
-  await nudgeModalEnqueue(job.id);
-
+  // A proposal, nothing more. The user applies it — which runs the same validation and the
+  // same prior gate as any other configuration.
   return NextResponse.json({
-    status: "refitted",
-    job_id: job.id,
-    round,
-    reasoning: proposal.reasoning ?? replyText,
+    status: "proposed",
+    intent,
+    reasoning: proposalReasoning ?? reasoning,
+    rounds_used: finishedRounds,
+    rounds_left: MAX_ROUNDS - finishedRounds,
   });
 }
 

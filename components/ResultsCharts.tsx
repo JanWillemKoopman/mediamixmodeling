@@ -699,7 +699,7 @@ function WhatIfSlider({ summary }: { summary: FitSummary }) {
 
   const interp = (pick: (f: (typeof frontier)[number]) => number): number => {
     const x = Math.min(max, Math.max(min, chosen));
-    let i = frontier.findIndex((f) => f.total_weekly_budget >= x);
+    const i = frontier.findIndex((f) => f.total_weekly_budget >= x);
     if (i <= 0) return pick(frontier[0]);
     const a = frontier[i - 1];
     const b = frontier[i];
@@ -815,13 +815,18 @@ export function ResultsCharts({
       carryover: Math.max(0, ch.carryover_contribution!.p50),
     }));
 
-  const roasData = summary.channels.map((ch) => ({
-    name: ch.name,
-    p50: ch.roas.p50,
-    errorRange: [ch.roas.p50 - ch.roas.p3, ch.roas.p97 - ch.roas.p50] as [number, number],
-    p3: ch.roas.p3,
-    p97: ch.roas.p97,
-  }));
+  // Only currency channels, and only those that actually spent: "return per e-mail sent"
+  // cannot share an axis with a euro break-even line, and a channel with no spend has no
+  // return at all.
+  const roasData = summary.channels
+    .filter((ch) => ch.unit === "currency" && ch.roas)
+    .map((ch) => ({
+      name: ch.name,
+      p50: ch.roas!.p50,
+      errorRange: [ch.roas!.p50 - ch.roas!.p3, ch.roas!.p97 - ch.roas!.p50] as [number, number],
+      p3: ch.roas!.p3,
+      p97: ch.roas!.p97,
+    }));
 
   const rowHeight = 32;
   const roasHeight = Math.max(120, roasData.length * rowHeight);

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useState } from "react";
-import type { JobConfig } from "@/lib/types";
+import type { ModelIntent } from "@/lib/types";
 import type { WizardPhase } from "@/lib/wizard/phase";
 
 // Bridges the chat panel and the read-only panels around it (ModelDossier, the review
@@ -13,9 +13,9 @@ interface WizardChatValue {
   clearPendingChatMessage: () => void;
   // "Config hergebruiken": de review-fase zet de configuratie van een eerdere run klaar,
   // de tuning-fase leest 'm als startpunt i.p.v. de standaard sjabloon-config.
-  reuseJobConfig: JobConfig | null;
-  setReuseJobConfig: (config: JobConfig | null) => void;
-  clearReuseJobConfig: () => void;
+  reuseIntent: ModelIntent | null;
+  setReuseIntent: (config: ModelIntent | null) => void;
+  clearReuseIntent: () => void;
   // Terugkoppeling/iteratie (blueprint stap 7): laat de bouwer op elk moment gericht
   // teruggaan naar een eerdere fase — bijv. vanuit de validatiestap naar tuning bij een
   // sampler-probleem, of naar data-voorbereiding bij een inhoudelijk plausibiliteitsprobleem
@@ -34,7 +34,7 @@ const WizardChatContext = createContext<WizardChatValue | null>(null);
 
 export function WizardChatProvider({ children }: { children: React.ReactNode }) {
   const [pendingChatMessage, setPendingChatMessage] = useState<string | null>(null);
-  const [reuseJobConfig, setReuseJobConfig] = useState<JobConfig | null>(null);
+  const [reuseIntent, setReuseIntent] = useState<ModelIntent | null>(null);
   const [overridePhase, setOverridePhase] = useState<WizardPhase | null>(null);
   const [overrideReason, setOverrideReason] = useState<string | null>(null);
 
@@ -54,9 +54,9 @@ export function WizardChatProvider({ children }: { children: React.ReactNode }) 
         pendingChatMessage,
         sendToChat: setPendingChatMessage,
         clearPendingChatMessage: () => setPendingChatMessage(null),
-        reuseJobConfig,
-        setReuseJobConfig,
-        clearReuseJobConfig: () => setReuseJobConfig(null),
+        reuseIntent,
+        setReuseIntent,
+        clearReuseIntent: () => setReuseIntent(null),
         overridePhase,
         overrideReason,
         goToPhase,

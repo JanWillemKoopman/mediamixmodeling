@@ -1,42 +1,73 @@
 import { createClient } from "@/lib/supabase/server";
 
-// Must match `max_containers` on `run_fit` in worker/mmm_worker/modal_app.py. One
-// Modal function (`run_fit`) dispatches BOTH job types ('fit' and 'prepare'), so they
-// share one container pool — this check must count both, not just fits.
-export const MAX_CONCURRENT_JOBS = 2;
+// How much work may be in flight at once, per kind. Two separate pools because the work is
+// nothing alike: a dataset build takes seconds and one core, a fit takes minutes and four.
+// v1 shared one pool, so a crashed five-second build held a fit slot for thirty-five minutes.
+export const MAX_CONCURRENT_FITS = 2;
+export const MAX_CONCURRENT_DATASET_BUILDS = 4;
 
-// A job whose container died without reaching mark_failed (Modal timeout kill, OOM)
-// stays 'running' in the database. The worker's poll_queue reaps those after this many
-// minutes; the capacity check below ignores anything older so a dead job can never
-// freeze the queue for good. Keep >= STALE_RUNNING_SECONDS in worker/mmm_worker/modal_app.py.
-const STALE_JOB_MINUTES = 40;
+// A row whose container died without reaching a terminal state is reaped by the worker's
+// poller after roughly this long. The capacity check ignores anything older, so a dead
+// container can never freeze the queue permanently.
+const STALE_MINUTES = 20;
 
-// 'queued' counts too, not just 'running': a queued job is about to consume a slot
-// (enqueue/poll_queue promotes it within seconds to a minute), so treating only
-// 'running' as occupied would let a burst of requests slip through the gap.
-export async function hasJobCapacity(supabase: ReturnType<typeof createClient>): Promise<boolean> {
-  const cutoff = new Date(Date.now() - STALE_JOB_MINUTES * 60_000).toISOString();
-  const { count } = await supabase
-    .schema("mmm")
-    .from("jobs")
-    .select("id", { count: "exact", head: true })
-    .in("status", ["queued", "running"])
-    .gte("created_at", cutoff);
-  return (count ?? 0) < MAX_CONCURRENT_JOBS;
+function cutoff(): string {
+  return new Date(Date.now() - STALE_MINUTES * 60_000).toISOString();
 }
 
-// Best-effort nudge so the Modal worker picks the job up immediately rather than waiting
-// for the next poll_queue tick (runs every minute regardless, so this is never required).
-export async function nudgeModalEnqueue(jobId: string): Promise<void> {
-  const enqueueUrl = process.env.MMM_MODAL_ENQUEUE_URL;
-  if (!enqueueUrl) return;
+/** Fits currently queued or running for this project. */
+export async function hasFitCapacity(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+): Promise<boolean> {
+  const { count } = await supabase
+    .schema("mmm")
+    .from("model_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .not("state", "in", "(completed,failed,cancelled)")
+    .gte("created_at", cutoff());
+  return (count ?? 0) < MAX_CONCURRENT_FITS;
+}
+
+export async function hasDatasetCapacity(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+): Promise<boolean> {
+  const { count } = await supabase
+    .schema("mmm")
+    .from("dataset_versions")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .in("status", ["queued", "building"])
+    .gte("created_at", cutoff());
+  return (count ?? 0) < MAX_CONCURRENT_DATASET_BUILDS;
+}
+
+/**
+ * Ask the worker to pick a row up now rather than waiting for its one-minute poll.
+ *
+ * Best-effort by design — the poll is the guarantee — but it has to actually work, and in
+ * v1 it never did: the Modal endpoint declared `job_id: str`, which FastAPI reads as a
+ * *query* parameter, while this function sent a JSON body. Every call returned 422, the
+ * caller swallowed it, and every single job silently waited a full minute before starting.
+ */
+export async function nudgeWorker(kind: "fit" | "dataset", id: string): Promise<void> {
+  const url = process.env.MMM_MODAL_ENQUEUE_URL;
+  const token = process.env.MMM_ENQUEUE_TOKEN;
+  if (!url || !token) return;
   try {
-    await fetch(enqueueUrl, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: jobId }),
+      body: JSON.stringify({ kind, id, token }),
     });
-  } catch {
-    // Non-fatal: poll_queue on Modal will still pick up the queued job.
+    if (!response.ok) {
+      // Log it rather than swallowing: a permanently broken nudge is invisible otherwise,
+      // and shows up only as "starting always takes a minute".
+      console.error(`[jobs] enqueue nudge failed (${response.status}) for ${kind} ${id}`);
+    }
+  } catch (err) {
+    console.error(`[jobs] enqueue nudge unreachable for ${kind} ${id}:`, err);
   }
 }
