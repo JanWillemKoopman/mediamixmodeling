@@ -48,7 +48,7 @@ auditrapport en is bewust niet herschreven: het beschrijft de toestand vóór de
 | 4 — Diagnostiek en identificeerbaarheid | ✅ | `model/identify.py`, uitgebreide `Diagnostics` in `model/fit.py` |
 | 5 — Validatielaag (4 niveaus) | ✅ | `model/validate.py`, `allowed_outputs` + `allows()` in de frontend |
 | 6 — Worker en state machine | ✅ | `worker/mmm_worker/runner.py`, `ports.py`, `jobspec.py` |
-| 7 — Datamodel en migratie | ✅ | `supabase/migrations/0021_mmm_v2_schema.sql` |
+| 7 — Datamodel en migratie | ✅ | `supabase/migrations/0022_mmm_v2_schema.sql` |
 | 8 — Data-ingestie | ✅ | `ingestion/columns.py` (`validate_columns`, `looks_like_identifier`) |
 | 9 — AI-orkestratie | ✅ | `propose_model_intent` (alleen enums), `/api/fit-refine` geeft voorstellen terug i.p.v. jobs aan te maken |
 | 10 — Opruimen en eindvalidatie | ✅ | eslint in CI, `pymc-marketing` verwijderd, documentatie samengevoegd in `docs/` |

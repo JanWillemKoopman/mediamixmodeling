@@ -1,4 +1,4 @@
-// Domain types mirroring the `mmm` Postgres schema (supabase/migrations/0021_mmm_v2_schema.sql).
+// Domain types mirroring the `mmm` Postgres schema (supabase/migrations/0022_mmm_v2_schema.sql).
 //
 // The shape of this file encodes the architecture. Two things are deliberately absent:
 //

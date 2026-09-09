@@ -17,7 +17,7 @@ Next.js (Vercel)  ──►  Supabase (Postgres + Storage + Realtime + RLS)  ◄
 | `app/`, `components/`, `lib/` | De Next.js-bouwersapp en het klantdashboard |
 | `packages/mmm-core/` | De statistische kern: ingestie, model, fit, diagnostiek, validatie, optimalisatie. Kent Supabase niet en heeft geen netwerk nodig. |
 | `worker/` | De Modal-worker: state machine, claiming, storage, foutclassificatie. Bevat geen statistiek — die leent hij van `mmm-core`. |
-| `supabase/migrations/` | Het schema. `0021_mmm_v2_schema.sql` is de huidige basis. |
+| `supabase/migrations/` | Het schema. `0022_mmm_v2_schema.sql` is de huidige basis. |
 
 De scheiding is bewust: alles wat een *statistische* beslissing is, hoort in `mmm-core` en is
 daar getest zonder database, worker of LLM. Alles wat een *levenscyclus*-beslissing is, hoort
