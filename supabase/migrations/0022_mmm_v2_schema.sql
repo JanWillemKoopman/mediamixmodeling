@@ -431,3 +431,21 @@ alter publication supabase_realtime add table mmm.model_results;
 -- ---------------------------------------------------------------------------
 -- De EDA-stap bestaat niet meer; deze vlag werd nergens gelezen.
 alter table mmm.projects drop column if exists eda_completed_at;
+
+-- ---------------------------------------------------------------------------
+-- Diepe data-inspectie: mee verhuisd naar dataset_versions
+--
+-- `data_inspections` overleeft deze migratie, maar wees met `dataset_id` naar de
+-- gedropte `datasets`-tabel. De cascade hierboven haalt die foreign key stilzwijgend
+-- weg en laat een kolom achter die nergens meer heen wijst. Hernoemen en opnieuw
+-- aanhaken, zodat de verwijzing weer afgedwongen wordt in plaats van bij afspraak te
+-- bestaan. De bestaande waarden verwijzen naar gedropte rijen, dus die gaan op null.
+-- ---------------------------------------------------------------------------
+alter table mmm.data_inspections
+  rename column dataset_id to dataset_version_id;
+
+update mmm.data_inspections set dataset_version_id = null;
+
+alter table mmm.data_inspections
+  add constraint data_inspections_dataset_version_id_fkey
+  foreign key (dataset_version_id) references mmm.dataset_versions (id) on delete cascade;

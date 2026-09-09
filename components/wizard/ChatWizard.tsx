@@ -228,12 +228,19 @@ export function ChatWizard({
     setPendingProposal(null);
   }, [phase]);
 
-  // Realtime: zodra de worker een dataset/job/run bijwerkt, ververst de server-render en
-  // schuift de fase vanzelf door — zonder pollen.
+  // Realtime: zodra de worker een datasetversie of run bijwerkt, ververst de server-render
+  // en schuift de fase vanzelf door — zonder pollen. De tabelnamen moeten meeveranderen met
+  // het schema: een subscriptie op een tabel die niet bestaat geeft geen fout, hij vuurt
+  // alleen nooit, en dan blijft de wizard stilstaan terwijl de worker gewoon doorwerkt.
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase.channel(`wizard-${projectId}`);
-    for (const table of ["datasets", "jobs", "model_runs", "data_inspections"] as const) {
+    for (const table of [
+      "dataset_versions",
+      "model_runs",
+      "model_results",
+      "data_inspections",
+    ] as const) {
       channel.on(
         "postgres_changes",
         { event: "*", schema: "mmm", table, filter: `project_id=eq.${projectId}` },
