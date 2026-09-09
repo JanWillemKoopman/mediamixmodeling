@@ -1,141 +1,117 @@
 "use client";
 
-import { CHANNELS, EFFECT_STEPS, PLATFORM_SIGNALS } from "@/lib/site/exampleData";
-import { nl } from "@/lib/site/format";
+import { CHANNELS, DECOMPOSITION, PLATFORM_SIGNALS } from "@/lib/site/exampleData";
+import { euroShort, nl } from "@/lib/site/format";
 import { Anim, Reveal } from "./motion";
-import { Container, ExampleTag, PanelBar, Section, SectionHead } from "./primitives";
+import { Container, ExampleTag, Label, Section, SectionHead } from "./primitives";
 
 /**
- * Sectie 02 — het probleem. Niet "je hebt geen data", maar: elk systeem rapporteert zijn
- * eigen succes en niemand kijkt naar het totaal. De visualisatie is de kern: acht losse
- * signalen die samenvloeien tot één beeld. Chaos → samenhang, in één figuur.
+ * Het probleem, in één beeld: links de losse signalen zoals ze binnenkomen, rechts wat er
+ * ontstaat als je ze in samenhang analyseert. Het contrast tussen de twee panelen doet het
+ * werk; de tekst blijft kort.
  */
 export function ProblemSection() {
   return (
-    <Section id="de-vraag" tone="canvas" labelledBy="de-vraag-titel">
-      <Container wide>
+    <Section id="vraag" labelledBy="vraag-titel">
+      <Container>
         <Reveal>
           <SectionHead
-            id="de-vraag-titel"
-            eyebrow="De vraag"
-            title={
-              <>
-                Je hebt genoeg marketingdata.
-                <br className="hidden sm:block" /> Je mist het totaalbeeld.
-              </>
-            }
-            intro="Elk platform rapporteert zijn eigen succes. Geen van die systemen kijkt naar je totale media-inzet, en geen van die maatstaven is met een andere te vergelijken. Opgeteld levert dat geen antwoord op de enige vraag die telt: wat draagt onze media bij aan het resultaat?"
+            id="vraag-titel"
+            watermark="Signaal"
+            label="De vraag · fragmentatie"
+            title="Geen gebrek aan cijfers."
+            accent="Wel aan een totaalbeeld."
+            intro="Je hebt cijfers uit Google, Meta, YouTube, TV, radio, analytics en je eigen systemen. Elk platform vertelt wat het eigen kanaal heeft opgeleverd. Geen van die systemen vertelt wat er in samenhang met je andere kanalen is gebeurd."
           />
         </Reveal>
 
-        <Reveal delay={100} className="mt-12 sm:mt-16">
-          <ConvergenceFigure />
-        </Reveal>
-      </Container>
-    </Section>
-  );
-}
-
-function ConvergenceFigure() {
-  return (
-    <Anim className="overflow-hidden rounded-panel border border-site-line bg-white shadow-site-card" threshold={0.2}>
-      <PanelBar
-        title="Signalen uit je stack"
-        right={<span className="font-mono text-[11px] text-site-text-faint">8 bronnen · 8 maatstaven</span>}
-      />
-
-      {/* Acht losse signalen: allemaal waar, geen twee vergelijkbaar. */}
-      <div className="grid grid-cols-2 gap-px bg-site-line sm:grid-cols-4">
-        {PLATFORM_SIGNALS.map((signal, i) => (
-          <div
-            key={signal.source}
-            className="site-stagger bg-white px-4 py-4 transition-colors duration-300 hover:bg-site-surface-2"
-            style={{ ["--d" as string]: `${i * 60}ms` }}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-[0.8125rem] font-medium text-site-text">{signal.source}</span>
-              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-site-text-faint">
-                {signal.metric}
-              </span>
+        <Anim className="mt-14 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-stretch lg:gap-6">
+          {/* Wat er nu binnenkomt: acht bronnen, acht maatstaven. */}
+          <div className="site-stagger u-card flex flex-col p-5 sm:p-7">
+            <div className="flex items-center justify-between gap-3">
+              <Label tone="muted">Vandaag · losse rapportages</Label>
+              <span className="u-label-sm u-label text-site-muted-2">8 bronnen</span>
             </div>
-            <p className="tnum mt-2 font-display text-[1.375rem] font-semibold tracking-[-0.02em] text-site-text">
-              {signal.value}
-            </p>
-            <p className="mt-1 truncate text-[11px] text-site-text-faint" title={signal.note}>
-              {signal.note}
+
+            <div className="mt-6 grid grid-cols-2 gap-2.5">
+              {PLATFORM_SIGNALS.map((signal) => (
+                <div key={signal.source} className="u-inset px-3 py-2.5">
+                  <p className="truncate text-[0.8125rem] font-semibold text-site-ink">{signal.source}</p>
+                  <p className="tnum mt-1 truncate font-mono text-[0.72rem] text-site-muted">
+                    {signal.metric} {signal.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-6 text-[0.875rem] leading-relaxed text-site-muted">
+              Acht maatstaven in acht eenheden, elk met een eigen attributiemodel en een eigen
+              periode. Optellen mag niet, vergelijken kan niet.
             </p>
           </div>
-        ))}
-      </div>
 
-      {/* De samenvloeiing. De lijnen tekenen zichzelf zodra de figuur in beeld komt. */}
-      <div className="relative border-t border-site-line bg-site-surface-2/50 px-4 sm:px-6">
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 1000 110"
-          preserveAspectRatio="none"
-          className="h-[88px] w-full sm:h-[110px]"
-        >
-          {[62, 187, 312, 437, 562, 687, 812, 937].map((x, i) => {
-            const d = `M ${x} 0 C ${x} 55, 500 45, 500 110`;
-            return (
-              <path
-                key={x}
-                d={d}
-                fill="none"
-                stroke="#1F5AFF"
-                strokeOpacity={0.45}
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-                className="site-draw"
-                style={{ ["--len" as string]: "260", ["--d" as string]: `${i * 70}ms` }}
-              />
-            );
-          })}
-        </svg>
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center">
-          <span className="site-fade translate-y-1/2 rounded-full border border-site-line bg-white px-3 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-site-blue shadow-site-card" style={{ ["--d" as string]: "700ms" }}>
-            één analyse
-          </span>
-        </div>
-      </div>
+          {/* De overgang. */}
+          <div className="site-stagger flex items-center justify-center py-2" style={{ ["--d" as string]: "140ms" }}>
+            <span aria-hidden="true" className="u-pill h-11 w-11 justify-center p-0 text-site-violet">
+              <svg viewBox="0 0 16 16" className="h-4 w-4 rotate-90 lg:rotate-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 8h10M9 4l4 4-4 4" />
+              </svg>
+            </span>
+          </div>
 
-      {/* Het samengevoegde beeld: dezelfde vijf kanalen, op één maatstaf. */}
-      <div className="border-t border-site-line px-4 py-6 sm:px-6 sm:py-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold tracking-[-0.02em] text-site-text">
-            Geschat totaal media-effect
-          </h3>
-          <ExampleTag>Voorbeelddata</ExampleTag>
-        </div>
-
-        <div className="mt-4 flex h-14 w-full gap-[2px] overflow-hidden rounded-[10px]">
-          {CHANNELS.map((channel, i) => (
-            <div
-              key={channel.key}
-              className="site-bar flex min-w-0 flex-col items-start justify-center gap-0.5 overflow-hidden px-2.5 first:rounded-l-[10px] last:rounded-r-[10px]"
-              style={{
-                ["--w" as string]: `${channel.effectShare}%`,
-                ["--w0" as string]: `${channel.spendShare}%`,
-                ["--d" as string]: `${900 + i * 60}ms`,
-                backgroundColor: EFFECT_STEPS[i],
-              }}
-            >
-              <span className={`truncate font-mono text-[10px] ${i < 3 ? "text-white/70" : "text-site-text/60"}`}>
-                {channel.label}
-              </span>
-              <span className={`tnum truncate text-[0.8125rem] font-medium ${i < 3 ? "text-white" : "text-site-text"}`}>
-                {nl(channel.effectShare)}%
-              </span>
+          {/* Wat de analyse ervan maakt: één beeld, één maatstaf. */}
+          <div className="site-stagger u-card u-card-md flex flex-col p-5 sm:p-7" style={{ ["--d" as string]: "260ms" }}>
+            <div className="flex items-center justify-between gap-3">
+              <Label>Met media-effect · één beeld</Label>
+              <ExampleTag />
             </div>
-          ))}
-        </div>
 
-        <p className="mt-4 max-w-2xl text-[0.875rem] leading-relaxed text-site-text-muted">
-          Geen achtste maatstaf erbij, maar één beeld waarin de kanalen op dezelfde manier en over
-          dezelfde periode zijn beoordeeld — inclusief de factoren die je resultaat verder bepalen.
-        </p>
-      </div>
-    </Anim>
+            <p className="u-label mt-6 text-site-muted-2">Waar het resultaat vandaan komt</p>
+            <div className="mt-3 flex h-12 gap-[2px] overflow-hidden rounded-chip">
+              {DECOMPOSITION.map((part, i) => (
+                <div
+                  key={part.label}
+                  className="site-bar flex min-w-0 items-center justify-center first:rounded-l-chip last:rounded-r-chip"
+                  style={{
+                    ["--w" as string]: `${part.value}%`,
+                    ["--w0" as string]: "0%",
+                    ["--d" as string]: `${300 + i * 90}ms`,
+                    backgroundColor: part.accent ? "#2E9E50" : i === 0 ? "#EDEDED" : i === 2 ? "#D9D9DE" : "#C0C0C6",
+                  }}
+                >
+                  <span className={`truncate px-2 font-mono text-[0.66rem] font-bold ${part.accent ? "text-white" : "text-site-muted"}`}>
+                    {nl(part.value)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+            <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
+              {DECOMPOSITION.map((part) => (
+                <li key={part.label} className="flex items-center gap-1.5 text-[0.78rem] text-site-muted">
+                  <span className={`h-1.5 w-1.5 rounded-full ${part.accent ? "bg-site-green-text" : "bg-site-muted-2/50"}`} />
+                  {part.label}
+                </li>
+              ))}
+            </ul>
+
+            <p className="u-label mt-7 text-site-muted-2">Media, uitgesplitst naar kanaal</p>
+            <ul className="mt-3 space-y-2">
+              {CHANNELS.slice(0, 4).map((channel) => (
+                <li key={channel.key} className="flex items-baseline justify-between gap-3 border-b border-site-line pb-2 last:border-b-0">
+                  <span className="text-[0.875rem] text-site-ink">{channel.label}</span>
+                  <span className="tnum flex items-baseline gap-2 font-mono text-[0.8rem] text-site-ink">
+                    {euroShort(channel.contribution)}
+                    <span className="text-[0.68rem] text-site-muted-2">
+                      ({euroShort(channel.low)}–{euroShort(channel.high)})
+                    </span>
+                  </span>
+                </li>
+              ))}
+              <li className="pt-1 text-[0.78rem] text-site-muted-2">+ 3 kanalen</li>
+            </ul>
+          </div>
+        </Anim>
+      </Container>
+    </Section>
   );
 }

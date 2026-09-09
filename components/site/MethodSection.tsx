@@ -1,68 +1,50 @@
-import { METHOD_STEPS } from "@/lib/site/copy";
+import { METHOD_QUESTIONS } from "@/lib/site/copy";
 import { Anim, Reveal } from "./motion";
-import { Container, PanelLabel, Section, SectionHead } from "./primitives";
+import { Container, Label, Section, SectionHead } from "./primitives";
 
 /**
- * Sectie 10 — pas hier de methode. De bezoeker hoeft de techniek niet te begrijpen; hij moet
- * kunnen vertrouwen dat er een serieuze analyse onder ligt. Vier stappen, één lijn: data,
- * analyse, inzicht, beslissing.
+ * Pas hier de methode, en niet eerder. De bezoeker hoeft de techniek niet te begrijpen; hij
+ * moet kunnen vertrouwen dat er een serieuze analyse onder ligt en zien welke vragen die
+ * beantwoordt. Geen college econometrie.
  */
 export function MethodSection() {
   return (
-    <Section id="methode" tone="canvas" labelledBy="methode-titel">
-      <Container wide>
-        <Reveal>
-          <SectionHead
-            id="methode-titel"
-            eyebrow="Methode"
-            title="Onderbouwd met Media Mix Modeling."
-            intro="Media Mix Modeling is de analysemethode achter de inzichten. We analyseren de relatie tussen mediabestedingen, bedrijfsresultaat en andere relevante factoren over een langere periode. Je hoeft geen econometrist te zijn om ermee te werken — wel om het goed te doen."
-          />
-        </Reveal>
+    <Section id="methode" wash labelledBy="methode-titel">
+      <Container>
+        <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,34rem)] lg:gap-20">
+          <Reveal>
+            <SectionHead
+              id="methode-titel"
+              watermark="Methode"
+              label="De methode erachter"
+              title="Onderbouwd met"
+              accent="Media Mix Modeling."
+              intro="Media Mix Modeling gebruikt historische marketing-, media- en bedrijfsdata om te schatten welke bijdrage je mediakanalen hebben geleverd aan je resultaat. Het werkt zonder cookies en zonder toegang tot persoonsgegevens: de analyse draait op geaggregeerde cijfers per week."
+            />
+          </Reveal>
 
-        <Anim className="mt-12 sm:mt-16">
-          <ol className="grid gap-px overflow-hidden rounded-panel border border-site-line bg-site-line md:grid-cols-2 lg:grid-cols-4">
-            {METHOD_STEPS.map((step, i) => (
-              <li
-                key={step.number}
-                className="site-stagger group relative bg-white p-6 transition-colors duration-300 hover:bg-site-canvas sm:p-7"
-                style={{ ["--d" as string]: `${i * 110}ms` }}
-              >
-                <div className="flex items-center justify-between">
-                  <PanelLabel>{step.number}</PanelLabel>
-                  {i < METHOD_STEPS.length - 1 && (
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 16 16"
-                      className="h-3.5 w-3.5 rotate-90 text-site-line-strong transition-colors duration-300 group-hover:text-site-blue lg:rotate-0"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M3 8h10M9 4l4 4-4 4" />
-                    </svg>
-                  )}
-                </div>
-
-                <h3 className="mt-5 font-display text-xl font-semibold tracking-[-0.02em] text-site-text">
-                  {step.title}
-                </h3>
-                <p className="mt-3 text-[0.9375rem] leading-relaxed text-site-text-muted">{step.body}</p>
-                <p className="mt-5 border-t border-site-line pt-4 text-[0.8125rem] text-site-text-faint">
-                  {step.note}
-                </p>
-
-                {/* Onderlijn die de stap markeert bij hover — het enige sieraad hier. */}
-                <span
-                  aria-hidden="true"
-                  className="absolute inset-x-0 bottom-0 h-px origin-left scale-x-0 bg-site-blue transition-transform duration-500 group-hover:scale-x-100"
-                />
-              </li>
-            ))}
-          </ol>
-        </Anim>
+          <Anim>
+            <div className="u-card u-card-md p-6 sm:p-8">
+              <Label tone="muted">Vragen die de analyse beantwoordt</Label>
+              <ul className="mt-6 divide-y divide-site-line border-y border-site-line">
+                {METHOD_QUESTIONS.map((question, i) => (
+                  <li
+                    key={question}
+                    className="site-stagger flex items-start gap-4 py-4"
+                    style={{ ["--d" as string]: `${i * 90}ms` }}
+                  >
+                    <span className="u-label mt-1 shrink-0 text-site-green-text">0{i + 1}</span>
+                    <span className="text-[0.9375rem] leading-snug text-site-ink">{question}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-6 text-[0.85rem] leading-relaxed text-site-muted">
+                Je hoeft geen econometrist te zijn om met de uitkomsten te werken. Wel om ze goed te
+                maken — daar zijn wij voor.
+              </p>
+            </div>
+          </Anim>
+        </div>
       </Container>
     </Section>
   );

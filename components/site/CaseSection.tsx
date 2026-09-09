@@ -1,165 +1,139 @@
-import {
-  CHANNELS,
-  EFFECT_STEPS,
-  EXAMPLE_CASE,
-  EXAMPLE_LABEL_LONG,
-  EXAMPLE_PROFILE,
-  SCENARIO,
-  estimateScenario,
-} from "@/lib/site/exampleData";
+import { CHANNELS, EXAMPLE_CASE, EXAMPLE_LABEL_LONG, EXAMPLE_PROFILE, SCENARIO, TOTAL_BUDGET, estimateScenario } from "@/lib/site/exampleData";
 import { SITE } from "@/lib/site/copy";
-import { nl, signedPct } from "@/lib/site/format";
+import { euroShort, signedPct } from "@/lib/site/format";
 import { Anim, Reveal } from "./motion";
-import { Button, Container, PanelLabel, Section, SectionHead } from "./primitives";
+import { Button, Container, Label, Section, SectionHead } from "./primitives";
 
 /**
- * Sectie 08 — de voorbeeldcase. Laat in één doorlopend verhaal zien hoe rapportage,
- * gemodelleerde bijdrage, beslissing en verwachte uitkomst zich tot elkaar verhouden.
- * Nadrukkelijk geen klantresultaat: dat staat er twee keer bij, en de cijfers komen uit de
- * voorbeelddataset.
+ * De voorbeeldcase: van wat de platforms rapporteerden, via de geschatte bijdrage, naar één
+ * besluit over het volgende mediaplan. Nadrukkelijk geen klantresultaat — dat staat er twee
+ * keer bij, en de cijfers komen uit de synthetische dataset.
  */
 export function CaseSection() {
   const estimate = estimateScenario(SCENARIO.initial);
+  const shifted = (TOTAL_BUDGET * SCENARIO.initial) / 100;
 
   return (
-    <Section id="voorbeeld" tone="canvas" labelledBy="case-titel">
-      <Container wide>
+    <Section id="voorbeeld" labelledBy="case-titel">
+      <Container>
         <Reveal>
           <SectionHead
             id="case-titel"
-            eyebrow="Voorbeeldanalyse"
-            title="Wat gebeurt er als je je budget anders verdeelt?"
-            intro="Eén doorlopend voorbeeld: van wat de platforms rapporteerden, via de geschatte bijdrage per kanaal, naar een besluit over het volgende mediaplan."
+            watermark="Voorbeeld"
+            label={EXAMPLE_LABEL_LONG}
+            title="Wat gebeurt er als je"
+            accent="je budget anders verdeelt?"
+            intro="Eén doorlopend voorbeeld op een synthetische dataset: het profiel, wat de analyse liet zien, het besluit dat eruit volgde en wat daarvan verwacht werd."
           />
         </Reveal>
 
-        <Reveal delay={100} className="mt-12 sm:mt-16">
-          <Anim className="overflow-hidden rounded-panel border border-site-line bg-white shadow-site-card">
-            {/* Waarschuwingsregel, bovenaan en niet weg te kijken. */}
-            <div className="flex items-center gap-2.5 border-b border-site-line bg-site-surface-2 px-4 py-3 sm:px-6">
-              <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-site-text-faint" />
-              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-site-text-muted">
-                {EXAMPLE_LABEL_LONG}
-              </p>
-            </div>
-
-            {/* Profiel van het voorbeeldbedrijf. */}
-            <dl className="grid grid-cols-2 gap-px border-b border-site-line bg-site-line lg:grid-cols-4">
+        <Anim className="mt-14 grid gap-4 lg:grid-cols-12 lg:gap-5">
+          {/* Profiel. */}
+          <div className="site-stagger u-card p-5 sm:p-7 lg:col-span-4">
+            <Label tone="muted">Profiel</Label>
+            <p className="mt-5 text-[1.0625rem] font-bold leading-snug tracking-[-0.01em] text-site-ink">
+              {EXAMPLE_PROFILE.sector}
+            </p>
+            <dl className="mt-6 space-y-3.5">
               {[
-                { label: "Profiel", value: "Retail", sub: EXAMPLE_PROFILE.sector },
-                { label: "Mediabudget", value: EXAMPLE_PROFILE.budgetLabel, sub: EXAMPLE_PROFILE.budgetSub },
-                { label: "Kanalen", value: EXAMPLE_PROFILE.channelsLabel, sub: EXAMPLE_PROFILE.channelsSub },
-                { label: "Historie", value: EXAMPLE_PROFILE.historyLabel, sub: EXAMPLE_PROFILE.historySub },
-              ].map((item, i) => (
-                <div key={item.label} className="site-stagger bg-white px-4 py-5 sm:px-6" style={{ ["--d" as string]: `${i * 90}ms` }}>
-                  <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-site-text-faint">
-                    {item.label}
-                  </dt>
-                  <dd className="mt-2 font-display text-xl font-semibold tracking-[-0.02em] text-site-text">
-                    {item.value}
-                  </dd>
-                  <dd className="mt-1 text-[0.8125rem] leading-snug text-site-text-muted">{item.sub}</dd>
+                [EXAMPLE_PROFILE.budget, EXAMPLE_PROFILE.budgetLabel],
+                [EXAMPLE_PROFILE.channels, EXAMPLE_PROFILE.channelsLabel],
+                [EXAMPLE_PROFILE.weeks, EXAMPLE_PROFILE.weeksLabel],
+              ].map(([value, label]) => (
+                <div key={label} className="flex items-baseline justify-between gap-4 border-b border-site-line pb-3 last:border-b-0">
+                  <dt className="text-[0.875rem] text-site-muted">{label}</dt>
+                  <dd className="tnum font-mono text-[0.875rem] font-semibold text-site-ink">{value}</dd>
                 </div>
               ))}
             </dl>
+          </div>
 
-            {/* Rapportage naast gemodelleerde bijdrage: hetzelfde budget, twee beelden. */}
-            <div className="grid lg:grid-cols-2">
-              <div className="border-b border-site-line px-4 py-6 sm:px-6 sm:py-8 lg:border-b-0 lg:border-r">
-                <PanelLabel>Wat de platforms rapporteerden</PanelLabel>
-                <ul className="mt-5 space-y-3">
-                  {CHANNELS.map((channel) => (
-                    <li key={channel.key} className="flex items-baseline justify-between gap-3 border-b border-site-line pb-3 last:border-b-0">
-                      <span className="text-[0.9375rem] text-site-text-muted">{channel.label}</span>
-                      <span className="tnum font-mono text-[0.875rem] text-site-text">{channel.platformMetric}</span>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-5 text-[0.875rem] leading-relaxed text-site-text-faint">
-                  Vijf maatstaven uit vijf systemen. Onderling niet vergelijkbaar, en geen van alle een
-                  uitspraak over het totaal.
-                </p>
-              </div>
-
-              <div className="px-4 py-6 sm:px-6 sm:py-8">
-                <PanelLabel>Wat de analyse schatte</PanelLabel>
-                <ul className="mt-5 space-y-3">
-                  {CHANNELS.map((channel, i) => (
-                    <li key={channel.key} className="border-b border-site-line pb-3 last:border-b-0">
-                      <div className="flex items-baseline justify-between gap-3">
-                        <span className="text-[0.9375rem] text-site-text">{channel.label}</span>
-                        <span className="tnum font-mono text-[0.875rem] text-site-text">
-                          {nl(channel.effectShare)}%
-                          <span className="ml-2 text-site-text-faint">
-                            {nl(channel.effectLow)}–{nl(channel.effectHigh)}%
-                          </span>
-                        </span>
-                      </div>
-                      <div className="mt-2 h-1.5 w-full rounded-full bg-site-surface-3">
-                        <div
-                          className="site-bar h-1.5 rounded-full"
-                          style={{
-                            ["--w" as string]: `${(channel.effectShare / 40) * 100}%`,
-                            ["--w0" as string]: `${(channel.spendShare / 40) * 100}%`,
-                            ["--d" as string]: `${i * 90}ms`,
-                            backgroundColor: EFFECT_STEPS[i],
-                          }}
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-5 text-[0.875rem] leading-relaxed text-site-text-muted">
-                  Eén maatstaf over alle kanalen en alle 209 weken, met bandbreedte — en met prijs,
-                  promotie en seizoen apart meegewogen.
-                </p>
-              </div>
-            </div>
-
-            {/* Wat de analyse liet zien. */}
-            <div className="grid gap-px border-t border-site-line bg-site-line lg:grid-cols-3">
+          {/* Wat de analyse liet zien. */}
+          <div className="site-stagger u-card p-5 sm:p-7 lg:col-span-8" style={{ ["--d" as string]: "120ms" }}>
+            <Label tone="muted">Wat de analyse liet zien</Label>
+            <ol className="mt-6 grid gap-6 sm:grid-cols-3">
               {EXAMPLE_CASE.findings.map((finding, i) => (
-                <div key={finding.title} className="site-stagger bg-white px-4 py-6 sm:px-6" style={{ ["--d" as string]: `${i * 110}ms` }}>
-                  <span className="font-mono text-[11px] tabular-nums text-site-blue">0{i + 1}</span>
-                  <h3 className="mt-3 font-display text-[1.0625rem] font-semibold leading-snug tracking-[-0.01em] text-site-text">
+                <li key={finding.title}>
+                  <span className="u-label text-site-green-text">0{i + 1}</span>
+                  <h3 className="mt-3 text-[0.9375rem] font-bold leading-snug tracking-[-0.01em] text-site-ink">
                     {finding.title}
                   </h3>
-                  <p className="mt-2.5 text-[0.875rem] leading-relaxed text-site-text-muted">{finding.body}</p>
-                </div>
+                  <p className="mt-2.5 text-[0.85rem] leading-relaxed text-site-muted">{finding.body}</p>
+                </li>
               ))}
+            </ol>
+          </div>
+
+          {/* Rapportage versus schatting, per kanaal. */}
+          <div className="site-stagger u-card overflow-hidden lg:col-span-7" style={{ ["--d" as string]: "220ms" }}>
+            <div className="border-b border-site-line px-5 py-4">
+              <Label tone="muted">Rapportage naast geschatte bijdrage</Label>
+            </div>
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem]">
+              <thead>
+                <tr className="border-b border-site-line">
+                  {["Kanaal", "Rapportage", "Besteding", "Geschatte bijdrage"].map((head, i) => (
+                    <th
+                      key={head}
+                      scope="col"
+                      className={`u-label-sm u-label px-5 py-3 text-site-muted-2 ${i === 0 ? "text-left" : "text-right"}`}
+                    >
+                      {head}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {CHANNELS.map((channel) => (
+                  <tr key={channel.key} className="border-b border-site-line last:border-b-0">
+                    <th scope="row" className="px-5 py-3 text-left text-[0.875rem] font-semibold text-site-ink">
+                      {channel.label}
+                    </th>
+                    <td className="tnum px-5 py-3 text-right font-mono text-[0.78rem] text-site-muted">{channel.reported}</td>
+                    <td className="tnum px-5 py-3 text-right font-mono text-[0.78rem] text-site-muted">{euroShort(channel.spend)}</td>
+                    <td className="tnum px-5 py-3 text-right font-mono text-[0.78rem] font-semibold text-site-ink">
+                      {euroShort(channel.contribution)}
+                      <span className="ml-2 font-normal text-site-muted-2">
+                        {euroShort(channel.low)}–{euroShort(channel.high)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          </div>
+
+          {/* Besluit en verwachte uitkomst. */}
+          <div className="site-stagger flex flex-col gap-4 lg:col-span-5" style={{ ["--d" as string]: "320ms" }}>
+            <div className="u-card flex-1 p-5 sm:p-7">
+              <Label tone="muted">Het besluit</Label>
+              <p className="mt-4 text-[1.0625rem] font-semibold leading-snug tracking-[-0.015em] text-site-ink">
+                {EXAMPLE_CASE.decision}
+              </p>
+              <p className="tnum mt-5 font-mono text-[0.8rem] text-site-muted">
+                {SCENARIO.initial}% van het budget = {euroShort(shifted)}
+              </p>
             </div>
 
-            {/* Het besluit en de verwachte uitkomst. */}
-            <div className="grid border-t border-site-line lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
-              <div className="px-4 py-6 sm:px-6 sm:py-8">
-                <PanelLabel>De beslissing</PanelLabel>
-                <p className="mt-4 max-w-2xl font-display text-[1.25rem] font-medium leading-snug tracking-[-0.02em] text-site-text sm:text-[1.375rem]">
-                  {EXAMPLE_CASE.decision}
-                </p>
-              </div>
-
-              <div className="border-t border-site-line bg-site-blue-soft px-4 py-6 sm:px-6 sm:py-8 lg:border-l lg:border-t-0">
-                <PanelLabel>{EXAMPLE_CASE.outcomeLabel}</PanelLabel>
-                <p className="tnum mt-3 font-display text-[2rem] font-semibold leading-none tracking-[-0.03em] text-site-blue">
-                  {signedPct(estimate.low)} <span className="text-site-blue/40">→</span> {signedPct(estimate.high)}
-                </p>
-                <p className="mt-3 text-[0.875rem] leading-relaxed text-site-text-muted">
-                  {EXAMPLE_CASE.outcomeNote}
-                </p>
-              </div>
+            <div className="u-card u-card-md bg-[rgba(185,239,163,0.22)] p-5 sm:p-7">
+              <Label>Geschat effect op omzet</Label>
+              <p className="tnum mt-3 text-[clamp(1.9rem,3.4vw,2.5rem)] font-extrabold leading-none tracking-[-0.04em] text-site-ink">
+                {signedPct(estimate.low)} <span className="text-site-muted-2">→</span> {signedPct(estimate.high)}
+              </p>
+              <p className="mt-3 text-[0.85rem] leading-relaxed text-site-muted">
+                Bandbreedte bij gelijkblijvend totaalbudget. De mogelijkheid dat het effect klein
+                blijft, zit er nadrukkelijk in.
+              </p>
             </div>
-
-            <p className="border-t border-site-line px-4 py-4 text-[0.8125rem] text-site-text-faint sm:px-6">
-              Alle cijfers in dit voorbeeld komen uit een synthetische dataset en zijn niet gebaseerd
-              op klantdata.
-            </p>
-          </Anim>
-        </Reveal>
+          </div>
+        </Anim>
 
         {/* Conversiemoment halverwege: de bezoeker heeft het hele verhaal net gezien. */}
         <Reveal delay={80}>
-          <div className="mt-8 flex flex-col items-start justify-between gap-4 rounded-panel border border-site-line bg-white px-5 py-5 sm:flex-row sm:items-center sm:px-7">
-            <p className="max-w-xl text-[1.0625rem] leading-snug text-site-text">
+          <div className="u-card mt-5 flex flex-col items-start justify-between gap-4 p-5 sm:flex-row sm:items-center sm:px-7">
+            <p className="max-w-xl text-[1.0625rem] font-medium leading-snug text-site-ink">
               Benieuwd hoe dit beeld eruitziet voor jouw kanalen en jouw resultaatcijfers?
             </p>
             <Button href="#demo" arrow className="shrink-0">

@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { FIT_CRITERIA, SITE } from "@/lib/site/copy";
 import { Reveal } from "./motion";
-import { Container, PanelLabel } from "./primitives";
+import { Container, Label } from "./primitives";
 
 /**
- * Sectie 12 — de enige conversie op de site. Vraagt precies genoeg voor een zinnig eerste
- * gesprek en geen veld meer. Gewone <form> met echte labels, een zichtbare foutmelding en
- * een verborgen honeypot-veld tegen bots; de aanvraag gaat naar /api/demo-request.
+ * De enige conversie op de site. Vraagt precies genoeg voor een zinnig eerste gesprek en geen
+ * veld meer: gewone <form> met echte labels, zichtbare foutmelding en een verborgen
+ * honeypot-veld tegen bots. De aanvraag gaat naar /api/demo-request.
  */
 
 const BUDGET_OPTIONS = [
@@ -29,16 +29,11 @@ export function CtaSection() {
     event.preventDefault();
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form).entries()) as Record<string, string>;
-
     // De API kent één naamveld; voor- en achternaam gaan er als één naam in.
-    const payload = {
-      ...data,
-      name: [data.firstName, data.lastName].filter(Boolean).join(" ").trim(),
-    };
+    const payload = { ...data, name: [data.firstName, data.lastName].filter(Boolean).join(" ").trim() };
 
     setStatus("sending");
     setError(null);
-
     try {
       const response = await fetch("/api/demo-request", {
         method: "POST",
@@ -63,39 +58,29 @@ export function CtaSection() {
     <section
       id="demo"
       aria-labelledby="demo-titel"
-      className="site-anchor on-ink relative overflow-hidden bg-site-ink py-20 text-site-on-ink sm:py-28 lg:py-32"
+      className="site-anchor u-wash relative isolate overflow-hidden border-t border-site-line bg-site-paper py-20 sm:py-24 lg:py-32"
     >
-      <div aria-hidden="true" className="site-grid-ink absolute inset-0 opacity-50" />
-      <div
-        aria-hidden="true"
-        className="absolute inset-x-0 top-0 h-80 bg-[radial-gradient(55%_100%_at_50%_0%,rgba(31,90,255,0.22),transparent_70%)]"
-      />
-
       <Container className="relative">
-        <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)] lg:gap-16">
+        <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,34rem)] lg:gap-20">
           <Reveal>
-            <p className="flex items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-site-blue-ink">
-              <span aria-hidden="true" className="h-1 w-1 rounded-full bg-site-blue-ink" />
-              Demo
-            </p>
-            <h2
-              id="demo-titel"
-              className="mt-5 max-w-xl font-display text-[clamp(2rem,4.6vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.035em] text-white"
-            >
-              Begin bij één vraag: wat doet ons mediabudget?
+            <Label>Demo aanvragen</Label>
+            <h2 id="demo-titel" className="u-display u-h2 mt-6 max-w-[16ch] text-site-ink">
+              Weet wat je
+              <br />
+              <span className="u-grad">mediabudget doet.</span>
             </h2>
-            <p className="mt-6 max-w-lg text-[1.0625rem] leading-relaxed text-site-on-ink-muted">
-              In een demo van ongeveer een half uur laten we zien hoe media-effect zichtbaar wordt en
-              welke vragen je ermee kunt beantwoorden. Geen verkooppraatje over techniek — een gesprek
-              over je budgetverdeling.
+            <p className="u-sub mt-7">
+              Begin met één vraag: wat doet ons mediabudget eigenlijk? In een demo van een half uur
+              laten we op een voorbeeldanalyse zien hoe media-effect zichtbaar wordt en welke vragen
+              je ermee kunt beantwoorden.
             </p>
 
-            <div className="mt-10 border-t border-site-line-ink pt-8">
-              <PanelLabel ink>Dit gesprek is nuttig als</PanelLabel>
-              <ul className="mt-4 space-y-3">
+            <div className="mt-10 border-t border-site-line pt-8">
+              <Label tone="muted">Dit gesprek is nuttig als</Label>
+              <ul className="mt-5 space-y-3">
                 {FIT_CRITERIA.map((criterion) => (
-                  <li key={criterion} className="flex gap-3 text-[0.9375rem] leading-relaxed text-site-on-ink-muted">
-                    <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-site-blue-ink" />
+                  <li key={criterion} className="flex gap-3 text-[0.9375rem] leading-relaxed text-site-muted">
+                    <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-site-green-text" />
                     {criterion}
                   </li>
                 ))}
@@ -104,56 +89,42 @@ export function CtaSection() {
           </Reveal>
 
           <Reveal delay={80}>
-            <div className="rounded-panel border border-site-line-ink bg-site-ink-2/90 p-5 backdrop-blur sm:p-7">
+            <div className="u-card u-card-md p-5 sm:p-7">
               {status === "sent" ? (
                 <div role="status">
-                  <h3 className="font-display text-xl font-semibold tracking-[-0.02em] text-white">
-                    Je aanvraag staat genoteerd.
-                  </h3>
-                  <p className="mt-3 text-[0.9375rem] leading-relaxed text-site-on-ink-muted">
+                  <h3 className="u-display u-h3 text-site-ink">Je aanvraag staat genoteerd.</h3>
+                  <p className="mt-4 text-[0.9375rem] leading-relaxed text-site-muted">
                     We nemen binnen twee werkdagen contact op om een moment te plannen. Wil je in de
                     tussentijd iets toevoegen, reageer dan gewoon op onze mail.
                   </p>
                   <button
                     type="button"
                     onClick={() => setStatus("idle")}
-                    className="mt-6 text-[0.875rem] text-site-blue-ink underline underline-offset-4 transition-colors hover:text-white"
+                    className="mt-6 text-[0.875rem] font-semibold text-site-violet underline underline-offset-4"
                   >
                     Nog een aanvraag versturen
                   </button>
                 </div>
               ) : (
                 <form onSubmit={onSubmit}>
-                  <h3 className="font-display text-xl font-semibold tracking-[-0.02em] text-white">
-                    {SITE.ctaPrimary}
-                  </h3>
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-[1.0625rem] font-bold tracking-[-0.01em] text-site-ink">{SITE.ctaPrimary}</h3>
+                    <span className="u-label-sm u-label text-site-muted-2">± 30 min</span>
+                  </div>
 
                   <div className="mt-6 grid gap-4 sm:grid-cols-2">
                     <Field id="firstName" name="firstName" label="Voornaam" autoComplete="given-name" required />
                     <Field id="lastName" name="lastName" label="Achternaam" autoComplete="family-name" required />
-                    <Field
-                      id="email"
-                      name="email"
-                      label="Zakelijk e-mailadres"
-                      type="email"
-                      autoComplete="email"
-                      required
-                      className="sm:col-span-2"
-                    />
+                    <Field id="email" name="email" label="Zakelijk e-mailadres" type="email" autoComplete="email" required className="sm:col-span-2" />
                     <Field id="company" name="company" label="Bedrijf" autoComplete="organization" required />
                     <Field id="role" name="role" label="Rol" autoComplete="organization-title" />
 
                     <div className="sm:col-span-2">
-                      <Label htmlFor="budget">Ordegrootte mediabudget</Label>
-                      <select
-                        id="budget"
-                        name="budget"
-                        defaultValue=""
-                        className="mt-1.5 w-full rounded-ctl border border-site-line-ink bg-white/[0.04] px-3.5 py-2.5 text-[0.9375rem] text-white outline-none transition-colors focus:border-site-blue-ink/60"
-                      >
+                      <FieldLabel htmlFor="budget">Ordegrootte mediabudget</FieldLabel>
+                      <select id="budget" name="budget" defaultValue="" className={FIELD_CLASS}>
                         <option value="">Maak een keuze</option>
                         {BUDGET_OPTIONS.map((option) => (
-                          <option key={option} value={option} className="text-site-text">
+                          <option key={option} value={option}>
                             {option}
                           </option>
                         ))}
@@ -161,15 +132,10 @@ export function CtaSection() {
                     </div>
 
                     <div className="sm:col-span-2">
-                      <Label htmlFor="message" optional>
+                      <FieldLabel htmlFor="message" optional>
                         Waar loop je nu tegenaan?
-                      </Label>
-                      <textarea
-                        id="message"
-                        name="message"
-                        rows={3}
-                        className="mt-1.5 w-full rounded-ctl border border-site-line-ink bg-white/[0.04] px-3.5 py-2.5 text-[0.9375rem] text-white outline-none transition-colors placeholder:text-white/30 focus:border-site-blue-ink/60"
-                      />
+                      </FieldLabel>
+                      <textarea id="message" name="message" rows={3} className={FIELD_CLASS} />
                     </div>
 
                     {/* Honeypot: onzichtbaar voor mensen, ingevuld door bots. */}
@@ -180,22 +146,15 @@ export function CtaSection() {
                   </div>
 
                   {error && (
-                    <p
-                      role="alert"
-                      className="mt-5 rounded-ctl border border-white/20 bg-white/[0.06] px-4 py-3 text-[0.875rem] text-white"
-                    >
+                    <p role="alert" className="u-inset mt-5 px-4 py-3 text-[0.875rem] text-site-ink">
                       {error}
                     </p>
                   )}
 
-                  <button
-                    type="submit"
-                    disabled={status === "sending"}
-                    className="mt-6 w-full rounded-ctl bg-site-blue px-5 py-3 text-[0.9375rem] font-medium text-white transition duration-200 hover:bg-site-blue-hover disabled:cursor-not-allowed disabled:opacity-60"
-                  >
+                  <button type="submit" disabled={status === "sending"} className="u-btn u-btn-primary mt-6 w-full disabled:cursor-not-allowed disabled:opacity-60">
                     {status === "sending" ? "Versturen…" : SITE.ctaPrimary}
                   </button>
-                  <p className="mt-4 text-[0.75rem] leading-relaxed text-site-on-ink-faint">
+                  <p className="mt-4 text-[0.75rem] leading-relaxed text-site-muted-2">
                     We gebruiken je gegevens alleen om contact met je op te nemen over deze aanvraag.
                   </p>
                 </form>
@@ -208,17 +167,12 @@ export function CtaSection() {
   );
 }
 
-function Label({
-  htmlFor,
-  children,
-  optional = false,
-}: {
-  htmlFor: string;
-  children: React.ReactNode;
-  optional?: boolean;
-}) {
+const FIELD_CLASS =
+  "mt-2 w-full rounded-ctl border border-site-line bg-site-paper-2 px-3.5 py-2.5 text-[0.9375rem] text-site-ink outline-none transition-colors focus:border-site-violet-line focus:bg-site-paper";
+
+function FieldLabel({ htmlFor, children, optional = false }: { htmlFor: string; children: React.ReactNode; optional?: boolean }) {
   return (
-    <label htmlFor={htmlFor} className="block font-mono text-[10px] uppercase tracking-[0.14em] text-site-on-ink-faint">
+    <label htmlFor={htmlFor} className="u-label-sm u-label text-site-muted-2">
       {children}
       {optional && <span className="normal-case tracking-normal"> (optioneel)</span>}
     </label>
@@ -244,17 +198,10 @@ function Field({
 }) {
   return (
     <div className={className}>
-      <Label htmlFor={id} optional={!required}>
+      <FieldLabel htmlFor={id} optional={!required}>
         {label}
-      </Label>
-      <input
-        id={id}
-        name={name}
-        type={type}
-        required={required}
-        autoComplete={autoComplete}
-        className="mt-1.5 w-full rounded-ctl border border-site-line-ink bg-white/[0.04] px-3.5 py-2.5 text-[0.9375rem] text-white outline-none transition-colors placeholder:text-white/30 focus:border-site-blue-ink/60"
-      />
+      </FieldLabel>
+      <input id={id} name={name} type={type} required={required} autoComplete={autoComplete} className={FIELD_CLASS} />
     </div>
   );
 }

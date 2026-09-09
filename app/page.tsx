@@ -4,17 +4,16 @@ import { getViewer } from "@/lib/auth";
 import { siteUrl } from "@/lib/site/siteUrl";
 import { CaseSection } from "@/components/site/CaseSection";
 import { CtaSection } from "@/components/site/CtaSection";
-import { DecisionsSection } from "@/components/site/DecisionsSection";
 import { EffectSection } from "@/components/site/EffectSection";
 import { Hero } from "@/components/site/Hero";
 import { MethodSection } from "@/components/site/MethodSection";
 import { ProblemSection } from "@/components/site/ProblemSection";
-import { ProofSection } from "@/components/site/ProofSection";
 import { ReportingSection } from "@/components/site/ReportingSection";
 import { ScenarioSection } from "@/components/site/ScenarioSection";
-import { ShiftSection } from "@/components/site/ShiftSection";
 import { SiteFooter } from "@/components/site/SiteFooter";
 import { SiteHeader } from "@/components/site/SiteHeader";
+import { StatsBand } from "@/components/site/StatsBand";
+import { StepsSection } from "@/components/site/StepsSection";
 import { TrustSection } from "@/components/site/TrustSection";
 
 // Leest de ingelogde gebruiker (cookies), dus per request renderen.
@@ -51,8 +50,7 @@ export const metadata: Metadata = {
   },
 };
 
-// Beschrijft de organisatie en de dienst feitelijk — geen beoordelingen of claims die we
-// niet kunnen hardmaken.
+// Beschrijft de dienst feitelijk — geen beoordelingen of claims die we niet kunnen hardmaken.
 const structuredData = {
   "@context": "https://schema.org",
   "@type": "ProfessionalService",
@@ -65,9 +63,9 @@ const structuredData = {
 };
 
 /**
- * De publieke site. Eén doorlopend verhaal in vier bewegingen: de vraag (waarom rapportage
- * niet genoeg is), het effect (wat de analyse laat zien), de beslissing (wat je ermee doet)
- * en de onderbouwing (hoe het werkt en wat je níét mag concluderen).
+ * De publieke site. Eén doorlopend verhaal: de vraag (waarom rapportage niet genoeg is), het
+ * scenario en het effect (wat de analyse laat zien), het voorbeeld (hoe dat tot een besluit
+ * leidt) en de onderbouwing (werkwijze, methode, onzekerheid).
  */
 export default async function Home() {
   // Een ingelogde bouwer heeft niets aan de commerciële pagina: door naar de projecten.
@@ -75,10 +73,10 @@ export default async function Home() {
   if (viewer) redirect("/projects");
 
   return (
-    <div id="site" className="bg-site-canvas text-site-text">
+    <div id="site" className="bg-site-paper text-site-ink">
       <a
         href="#main"
-        className="sr-only rounded-ctl bg-site-blue px-5 py-3 text-sm font-medium text-white focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60]"
+        className="sr-only rounded-full bg-site-violet px-5 py-3 text-sm font-semibold text-white focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60]"
       >
         Naar de inhoud
       </a>
@@ -87,14 +85,13 @@ export default async function Home() {
 
       <main id="main">
         <Hero />
+        <StatsBand />
         <ProblemSection />
         <ReportingSection />
         <ScenarioSection />
         <EffectSection />
-        <DecisionsSection />
-        <ShiftSection />
         <CaseSection />
-        <ProofSection />
+        <StepsSection />
         <MethodSection />
         <TrustSection />
         <CtaSection />

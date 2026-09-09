@@ -1,241 +1,135 @@
 "use client";
 
-import { DECOMPOSITION, EFFECT_STEPS, PLATFORM_SIGNALS, REPORTING_GAP } from "@/lib/site/exampleData";
-import { nl } from "@/lib/site/format";
-import { Reveal, useCountUp, useInView, useStepper } from "./motion";
-import { Container, ExampleTag, PanelLabel, Section, SectionHead } from "./primitives";
+import { CHANNELS, REPORTING_GAP } from "@/lib/site/exampleData";
+import { euroShort, nl } from "@/lib/site/format";
+import { Anim, Reveal, useCountUp, useInView } from "./motion";
+import { Container, ExampleTag, Label, Section, SectionHead } from "./primitives";
 
 /**
- * Sectie 03 — het scherpste onderscheid van de hele site: rapporteren is iets anders dan
- * verklaren. Drie standen, in deze volgorde: wat de platforms optellen, wat het bedrijf zelf
- * registreerde, en wat een analyse daar overhoudt om te verklaren. De bezoeker ziet het
- * verschil in plaats van erover te lezen.
+ * Het scherpste onderscheid van de site: rapporteren is iets anders dan verklaren. Drie
+ * schakels naast elkaar — wat de platforms rapporteren, wat het bedrijf zelf registreert, en
+ * wat de analyse daarvan probeert te verklaren. Het verschil tussen de eerste twee getallen
+ * is het hele argument.
  */
-
-const STAGES = [
-  { key: "gerapporteerd", label: "Wat platforms rapporteren" },
-  { key: "geregistreerd", label: "Wat je bedrijf registreert" },
-  { key: "verklaard", label: "Wat de analyse verklaart" },
-] as const;
-
 export function ReportingSection() {
-  const { ref, inView } = useInView<HTMLDivElement>(0.25);
-  const { step, setStep, setPaused } = useStepper(STAGES.length, inView, 4600);
+  const { ref, inView } = useInView<HTMLDivElement>(0.2);
+  const reported = useCountUp(REPORTING_GAP.reported, inView, 1200);
+  const actual = useCountUp(REPORTING_GAP.actual, inView, 1400);
 
   return (
-    <Section id="media-effect" tone="surface" labelledBy="verklaren-titel">
-      <Container wide>
+    <Section wash labelledBy="verklaren-titel">
+      <Container>
         <Reveal>
           <SectionHead
             id="verklaren-titel"
-            eyebrow="Rapportage versus verklaring"
-            title="Rapporteren is iets anders dan verklaren."
-            intro="Platformrapportages tellen op wat ze zelf hebben gezien. Ze corrigeren niet voor elkaar, niet voor je prijs, niet voor je promoties en niet voor het seizoen. Een verklaring begint pas als je alles tegelijk bekijkt."
+            watermark="Verklaren"
+            label="Rapportage · verklaring"
+            title="Rapporteren is iets"
+            accent="anders dan verklaren."
+            intro="Platformrapportages tellen op wat ze zelf hebben gezien. Ze corrigeren niet voor elkaar, niet voor je prijs, niet voor je promoties en niet voor het seizoen."
           />
         </Reveal>
 
-        <div ref={ref} className="mt-12 grid gap-8 lg:mt-16 lg:grid-cols-[19rem_minmax(0,1fr)] lg:gap-12">
-          {/* De drie stappen als bediening: klikken pint de stand vast. */}
-          <Reveal>
-            <ol className="relative flex gap-2 lg:flex-col lg:gap-0">
-              {STAGES.map((stage, i) => (
-                <li key={stage.key} className="flex-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPaused(true);
-                      setStep(i);
-                    }}
-                    aria-current={step === i}
-                    className={`group relative w-full border-site-line py-3 text-left transition-colors duration-300 lg:border-t lg:py-5 ${
-                      step === i ? "text-site-text" : "text-site-text-faint hover:text-site-text-muted"
-                    }`}
-                  >
-                    <span className="flex items-center gap-3">
-                      <span
-                        className={`font-mono text-[11px] tabular-nums transition-colors ${
-                          step === i ? "text-site-blue" : "text-site-text-faint"
-                        }`}
-                      >
-                        0{i + 1}
-                      </span>
-                      <span className="text-[0.9375rem] font-medium leading-snug">{stage.label}</span>
-                    </span>
-                    {/* Voortgangslijn: vult zich zolang deze stand actief is. */}
-                    <span
-                      aria-hidden="true"
-                      className={`absolute inset-x-0 -top-px h-px origin-left bg-site-blue transition-transform duration-500 ${
-                        step === i ? "scale-x-100" : "scale-x-0"
-                      }`}
-                    />
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </Reveal>
+        <div ref={ref} className="mt-14">
+          <Anim className="grid gap-4 lg:grid-cols-3 lg:gap-5">
+            {/* 01 — wat de platforms optellen. */}
+            <article className="site-stagger u-card flex flex-col p-5 sm:p-7">
+              <div className="flex items-center justify-between gap-3">
+                <Label tone="muted">01 · wat platforms rapporteren</Label>
+              </div>
+              <p className="tnum mt-6 text-[clamp(1.9rem,3.4vw,2.6rem)] font-extrabold leading-none tracking-[-0.04em] text-site-ink">
+                {nl(Math.round(reported))}
+              </p>
+              <p className="mt-2 text-[0.875rem] text-site-muted">conversies, opgeteld uit alle rapportages</p>
+              <ul className="mt-6 space-y-2">
+                {CHANNELS.slice(0, 4).map((channel) => (
+                  <li key={channel.key} className="flex items-baseline justify-between gap-3 border-b border-site-line pb-2 last:border-b-0">
+                    <span className="text-[0.8125rem] text-site-muted">{channel.label}</span>
+                    <span className="tnum font-mono text-[0.78rem] text-site-ink">{channel.reported}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-auto pt-6 text-[0.85rem] leading-relaxed text-site-muted">
+                Elk systeem rekent zichzelf dezelfde order toe. Optellen mag dus eigenlijk niet.
+              </p>
+            </article>
 
-          <Reveal delay={80}>
-            <div className="overflow-hidden rounded-panel border border-site-line bg-site-canvas shadow-site-card">
-              <div className="flex items-center justify-between gap-3 border-b border-site-line px-4 py-3 sm:px-5">
-                <PanelLabel>{STAGES[step].label}</PanelLabel>
-                <ExampleTag>Voorbeelddata</ExampleTag>
+            {/* 02 — wat het bedrijf zelf registreerde. */}
+            <article className="site-stagger u-card flex flex-col p-5 sm:p-7" style={{ ["--d" as string]: "120ms" }}>
+              <Label tone="muted">02 · wat je bedrijf registreert</Label>
+              <p className="tnum mt-6 text-[clamp(1.9rem,3.4vw,2.6rem)] font-extrabold leading-none tracking-[-0.04em] text-site-ink">
+                {nl(Math.round(actual))}
+              </p>
+              <p className="mt-2 text-[0.875rem] text-site-muted">orders in je eigen ordersysteem, zelfde periode</p>
+
+              <div className="mt-6 space-y-3">
+                <Bar label="Gerapporteerd" value={REPORTING_GAP.reported} max={REPORTING_GAP.reported} tone="#C0C0C6" />
+                <Bar label="Geregistreerd" value={REPORTING_GAP.actual} max={REPORTING_GAP.reported} tone="#0B0B0C" />
               </div>
-              <div className="min-h-[22rem] px-4 py-6 sm:px-6 sm:py-8">
-                {step === 0 && <ReportedStage active={inView} />}
-                {step === 1 && <RegisteredStage />}
-                {step === 2 && <ExplainedStage />}
+
+              <p className="mt-auto pt-6 text-[0.85rem] leading-relaxed text-site-muted">
+                Het verschil is geen fout van één systeem. Het is wat er gebeurt als iedereen
+                hetzelfde resultaat claimt.
+              </p>
+            </article>
+
+            {/* 03 — wat de analyse ervan verklaart. */}
+            <article className="site-stagger u-card u-card-md flex flex-col p-5 sm:p-7" style={{ ["--d" as string]: "240ms" }}>
+              <div className="flex items-center justify-between gap-3">
+                <Label>03 · wat de analyse verklaart</Label>
+                <ExampleTag />
               </div>
-            </div>
-          </Reveal>
+
+              <p className="mt-6 text-[0.9rem] leading-relaxed text-site-muted">
+                De analyse rekent terug wat er van je resultaat samenhangt met media, en splitst dat
+                uit over je kanalen — met de bandbreedte erbij.
+              </p>
+
+              <ul className="mt-6 space-y-2.5">
+                {CHANNELS.slice(0, 4).map((channel, i) => (
+                  <li key={channel.key}>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-[0.8125rem] text-site-ink">{channel.label}</span>
+                      <span className="tnum font-mono text-[0.78rem] text-site-ink">{euroShort(channel.contribution)}</span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 rounded-full bg-site-paper-3">
+                      <div
+                        className="site-bar h-1.5 rounded-full bg-site-green-text"
+                        style={{
+                          ["--w" as string]: `${(channel.contribution / 3_100_000) * 100}%`,
+                          ["--w0" as string]: "0%",
+                          ["--d" as string]: `${400 + i * 90}ms`,
+                        }}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <p className="mt-auto pt-6 text-[0.85rem] leading-relaxed text-site-muted">
+                Geen negende maatstaf erbij: één maatstaf waarop je kanalen eindelijk vergelijkbaar
+                zijn.
+              </p>
+            </article>
+          </Anim>
         </div>
       </Container>
     </Section>
   );
 }
 
-/** Stand 1: zeven systemen, zeven waarheden, één optelsom die niemand kan controleren. */
-function ReportedStage({ active }: { active: boolean }) {
-  const total = useCountUp(REPORTING_GAP.reported, active, 1200);
+function Bar({ label, value, max, tone }: { label: string; value: number; max: number; tone: string }) {
   return (
     <div>
-      <div className="grid gap-px overflow-hidden rounded-card border border-site-line bg-site-line sm:grid-cols-2">
-        {PLATFORM_SIGNALS.slice(0, 6).map((signal) => (
-          <div key={signal.source} className="flex items-baseline justify-between gap-3 bg-white px-4 py-3">
-            <span className="text-[0.875rem] text-site-text">{signal.source}</span>
-            <span className="tnum font-mono text-[0.8125rem] text-site-text-muted">
-              {signal.metric} {signal.value}
-            </span>
-          </div>
-        ))}
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="u-label-sm u-label text-site-muted-2">{label}</span>
+        <span className="tnum font-mono text-[0.78rem] text-site-ink">{nl(value)}</span>
       </div>
-
-      <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <PanelLabel>Opgeteld uit alle platformrapportages</PanelLabel>
-          <p className="tnum mt-2 font-display text-[2.5rem] font-semibold leading-none tracking-[-0.03em] text-site-text">
-            {nl(Math.round(total))}
-          </p>
-          <p className="mt-1.5 text-[0.875rem] text-site-text-muted">conversies</p>
-        </div>
-        <p className="max-w-xs text-[0.875rem] leading-relaxed text-site-text-muted">
-          Elk systeem rekent zichzelf dezelfde order toe. Optellen mag dus eigenlijk niet — en toch
-          is dit het getal dat in de meeste rapportages staat.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/** Stand 2: het eigen ordersysteem. Hetzelfde bedrijf, dezelfde periode, een ander getal. */
-function RegisteredStage() {
-  const max = Math.max(REPORTING_GAP.reported, REPORTING_GAP.actual);
-  const gap = REPORTING_GAP.reported - REPORTING_GAP.actual;
-  const rows = [
-    { label: REPORTING_GAP.reportedLabel, value: REPORTING_GAP.reported, tone: "muted" as const },
-    { label: REPORTING_GAP.actualLabel, value: REPORTING_GAP.actual, tone: "blue" as const },
-  ];
-
-  return (
-    <div>
-      <div className="space-y-7">
-        {rows.map((row, i) => (
-          <div key={row.label}>
-            <div className="flex items-baseline justify-between gap-4">
-              <span className="max-w-[22rem] text-[0.875rem] leading-snug text-site-text-muted">{row.label}</span>
-              <span className="tnum font-display text-[1.75rem] font-semibold leading-none tracking-[-0.03em] text-site-text">
-                {nl(row.value)}
-              </span>
-            </div>
-            <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-site-surface-3">
-              <div
-                className="h-3 rounded-full transition-[width] duration-[900ms] ease-out"
-                style={{
-                  width: `${(row.value / max) * 100}%`,
-                  backgroundColor: row.tone === "blue" ? "#1F5AFF" : "#A3ABB8",
-                  transitionDelay: `${i * 160}ms`,
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-8 rounded-card border border-site-line bg-white px-4 py-4 sm:px-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <PanelLabel>Verschil</PanelLabel>
-          <span className="tnum font-mono text-[0.8125rem] text-site-blue">
-            {nl(gap)} conversies · {REPORTING_GAP.periodLabel}
-          </span>
-        </div>
-        <p className="mt-3 text-[0.875rem] leading-relaxed text-site-text-muted">
-          Niet omdat een systeem liegt, maar omdat elk systeem hetzelfde resultaat aan zichzelf
-          toeschrijft. De vraag welk deel van die orders er zónder media ook was geweest, stelt geen
-          van beide rapportages.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/** Stand 3: wat er te verklaren valt — media is één factor, en niet de grootste. */
-function ExplainedStage() {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-4">
-        <PanelLabel>Waar komt het resultaat vandaan?</PanelLabel>
-        <span className="font-mono text-[11px] text-site-text-faint">geschat, 209 weken</span>
-      </div>
-
-      <div className="mt-4 flex h-16 w-full gap-[2px] overflow-hidden rounded-[10px]">
-        {DECOMPOSITION.map((part, i) => (
-          <div
-            key={part.label}
-            className="flex min-w-0 flex-col justify-center overflow-hidden px-3 transition-[width] duration-[900ms] ease-out first:rounded-l-[10px] last:rounded-r-[10px]"
-            style={{
-              width: `${part.value}%`,
-              backgroundColor: part.accent ? "#1F5AFF" : i === 0 ? "#E9EDF3" : i === 2 ? "#CBD1DA" : "#A3ABB8",
-              transitionDelay: `${i * 90}ms`,
-            }}
-          >
-            <span className={`truncate font-mono text-[10px] ${part.accent ? "text-white/75" : "text-site-text/55"}`}>
-              {part.label}
-            </span>
-            <span className={`tnum text-[0.9375rem] font-medium ${part.accent ? "text-white" : "text-site-text"}`}>
-              {nl(part.value)}%
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <ul className="mt-5 grid gap-x-8 gap-y-2 sm:grid-cols-2">
-        {DECOMPOSITION.map((part) => (
-          <li key={part.label} className="flex items-baseline gap-2 text-[0.8125rem] text-site-text-muted">
-            <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${part.accent ? "bg-site-blue" : "bg-site-text-faint/50"}`} />
-            <span>
-              <span className="text-site-text">{part.label}</span> — {part.note}
-            </span>
-          </li>
-        ))}
-      </ul>
-
-      <div className="mt-7 rounded-card border border-site-line bg-white px-4 py-4 sm:px-5">
-        <p className="text-[0.875rem] leading-relaxed text-site-text-muted">
-          Pas als die andere factoren apart zijn meegewogen, blijft er een geschatte bijdrage van
-          media over — en die valt vervolgens uiteen over je kanalen.
-        </p>
-        <div className="mt-4 flex h-8 w-full gap-[2px] overflow-hidden rounded-[8px]">
-          {["Shopping", "Search", "TV", "Social", "Radio & overig"].map((label, i) => (
-            <div
-              key={label}
-              className="flex min-w-0 items-center justify-center overflow-hidden first:rounded-l-[8px] last:rounded-r-[8px]"
-              style={{ width: `${[26, 19, 24, 15, 16][i]}%`, backgroundColor: EFFECT_STEPS[i] }}
-            >
-              <span className={`truncate px-1 font-mono text-[10px] ${i < 3 ? "text-white/85" : "text-site-text/65"}`}>
-                {label}
-              </span>
-            </div>
-          ))}
-        </div>
+      <div className="mt-1.5 h-2 rounded-full bg-site-paper-3">
+        <div
+          className="site-bar h-2 rounded-full"
+          style={{ ["--w" as string]: `${(value / max) * 100}%`, ["--w0" as string]: "0%", backgroundColor: tone }}
+        />
       </div>
     </div>
   );

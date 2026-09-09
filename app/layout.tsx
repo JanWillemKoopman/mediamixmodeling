@@ -1,31 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Inter_Tight, JetBrains_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
-// Eén moderne grotesk draagt de hele site: Inter voor UI en broodtekst. Wordt bij de build
-// self-hosted (geen runtime-CDN).
-const sans = Inter({
+// De referentie zet alles in Aeonik — een gelicenseerde geometrische grotesk die we niet
+// mogen meeleveren. Plus Jakarta Sans komt van de vrij beschikbare families het dichtst bij
+// die vorm: geometrisch skelet, ronde bollingen, strak in kapitalen, en beschikbaar tot 800
+// zodat de zware displaykoppen kloppen. Eén familie voor koppen én broodtekst, self-hosted
+// via next/font (geen runtime-CDN).
+const sans = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700", "800"],
   variable: "--font-sans",
-  display: "swap",
-});
-
-// Display: dezelfde skelet-vorm, krapper getekend. Grote koppen krijgen daardoor een
-// eigen stem zonder dat de pagina naar een tijdschrift of rapport gaat ruiken.
-const display = Inter_Tight({
-  subsets: ["latin"],
-  weight: ["500", "600"],
-  variable: "--font-display",
-  display: "swap",
-});
-
-// Mono voor de technische microlabels in de productpanelen (metrics, assen, statusregels).
-// Dat is wat een datavisualisatie laat lezen als software in plaats van als infographic.
-const mono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400"],
-  variable: "--font-mono",
   display: "swap",
 });
 
@@ -46,7 +31,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="nl" className={`${sans.variable} ${display.variable} ${mono.variable}`}>
+    <html lang="nl" className={sans.variable}>
       <head>
         {/* Zet de js-vlag vóór de eerste paint. Alle inhoud is standaard zichtbaar; alleen
             mét JavaScript starten onthullings- en balkanimaties in hun beginstand, zodat de

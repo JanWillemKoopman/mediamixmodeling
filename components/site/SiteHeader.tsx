@@ -3,32 +3,26 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { NAV, SITE } from "@/lib/site/copy";
-import { Button } from "./primitives";
 
 /**
- * Compacte, plakkende koptekst. In rust vrijwel onzichtbaar boven de hero; zodra je scrolt
- * krijgt hij een eigen vlak met een haarlijn eronder. Het mobiele menu schuift open in
- * dezelfde balk — geen paginavullend overlay-menu.
+ * Vaste, transparante koptekst die pas een wit vlak krijgt zodra je scrolt. Drie kolommen:
+ * woordmerk links, menu gecentreerd, acties rechts. De hoogte groeit mee met het scherm
+ * (64 → 80 → 112px), net als de zijmarges van de container.
  */
 export function SiteHeader() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-
   const [active, setActive] = useState<string | null>(null);
 
-  // Eén scroll-handler voor beide dingen: het vlak van de header, en welk menu-item bij de
-  // sectie hoort waar de bezoeker nu is. Gethrottled op de frame-rate, dus geen layout-werk
-  // per scroll-event.
   useEffect(() => {
     let frame = 0;
     const update = () => {
       frame = 0;
       setScrolled(window.scrollY > 8);
-
       let current: string | null = null;
       for (const item of NAV) {
         const el = document.querySelector(item.href);
-        if (el && el.getBoundingClientRect().top <= 140) current = item.href;
+        if (el && el.getBoundingClientRect().top <= 160) current = item.href;
       }
       setActive(current);
     };
@@ -43,12 +37,11 @@ export function SiteHeader() {
     };
   }, []);
 
-  // Een open menu mag niet blijven staan als de bezoeker naar een anker springt.
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
-    window.addEventListener("hashchange", close);
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("hashchange", close);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("hashchange", close);
@@ -58,25 +51,23 @@ export function SiteHeader() {
 
   return (
     <header
-      className={`sticky top-0 z-50 transition-[background-color,border-color,backdrop-filter] duration-300 ${
-        scrolled || open
-          ? "border-b border-site-line bg-site-canvas/80 backdrop-blur-xl"
-          : "border-b border-transparent"
+      className={`fixed inset-x-0 top-0 z-50 h-16 transition-colors duration-300 lg:h-20 2xl:h-28 ${
+        scrolled || open ? "border-b border-site-line bg-site-paper/90 backdrop-blur-xl" : "border-b border-transparent"
       }`}
     >
-      <div className="mx-auto flex h-[60px] w-full max-w-[88rem] items-center justify-between gap-4 px-5 sm:px-8 lg:px-10">
-        <a href="#top" className="-m-2 flex items-center gap-2 p-2" aria-label={`${SITE.wordmark} — naar boven`}>
+      <div className="mx-auto flex h-full w-full max-w-[120rem] items-center justify-between gap-5 px-5 md:grid md:grid-cols-[0.5fr_2fr_0.5fr] xl:gap-16 xl:px-16">
+        <a href="#top" className="-m-2 w-fit p-2" aria-label={`${SITE.wordmark} — naar boven`}>
           <Wordmark />
         </a>
 
-        <nav aria-label="Hoofdmenu" className="hidden items-center gap-1 md:flex">
+        <nav aria-label="Hoofdmenu" className="hidden justify-center gap-1 md:flex">
           {NAV.map((item) => (
             <a
               key={item.href}
               href={item.href}
               aria-current={active === item.href ? "true" : undefined}
-              className={`rounded-ctl px-3 py-2 text-[0.875rem] transition-colors duration-200 hover:bg-site-surface-2 hover:text-site-text ${
-                active === item.href ? "bg-site-surface-2 text-site-text" : "text-site-text-muted"
+              className={`rounded-full px-3.5 py-2 text-[0.875rem] font-medium transition-colors duration-200 hover:text-site-ink ${
+                active === item.href ? "text-site-ink" : "text-site-muted"
               }`}
             >
               {item.label}
@@ -84,27 +75,32 @@ export function SiteHeader() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-1.5 sm:gap-3">
+        <div className="flex items-center justify-end gap-2 sm:gap-4">
           <Link
             href="/login"
-            className="hidden rounded-ctl px-3 py-2 text-[0.875rem] text-site-text-muted transition-colors duration-200 hover:text-site-text sm:inline-flex"
+            className="hidden text-[0.875rem] font-medium text-site-muted transition-colors hover:text-site-ink sm:inline"
           >
             Inloggen
           </Link>
-          {/* Op smalle schermen kort label, zodat de knop nooit over twee regels breekt. */}
-          <Button href="#demo" className="whitespace-nowrap px-4 py-2.5 text-[0.875rem]">
-            <span className="sm:hidden">Demo aanvragen</span>
+          {/* De actie in de kop staat als omlijnde pil; de gevulde violette knop is voor de
+              hero en de slotsectie — zo blijft er één primaire actie per beeld. */}
+          <a
+            href="#demo"
+            className="u-btn u-btn-sm border border-site-green-line bg-site-paper text-site-ink shadow-site-sm transition hover:border-site-green-text hover:bg-[rgba(185,239,163,0.28)]"
+          >
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-site-green-text" />
             <span className="hidden sm:inline">{SITE.ctaPrimary}</span>
-          </Button>
+            <span className="sm:hidden">Demo</span>
+          </a>
           <button
             type="button"
             aria-expanded={open}
             aria-controls="site-menu"
             aria-label={open ? "Menu sluiten" : "Menu openen"}
             onClick={() => setOpen((v) => !v)}
-            className="-mr-1 inline-flex h-10 w-10 items-center justify-center rounded-ctl text-site-text transition-colors hover:bg-site-surface-2 md:hidden"
+            className="-mr-1 inline-flex h-10 w-10 items-center justify-center rounded-full text-site-ink transition-colors hover:bg-site-paper-2 md:hidden"
           >
-            <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+            <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
               {open ? <path d="M5 5l10 10M15 5L5 15" /> : <path d="M3 6h14M3 12h14" />}
             </svg>
           </button>
@@ -112,14 +108,14 @@ export function SiteHeader() {
       </div>
 
       {open && (
-        <div id="site-menu" className="site-sheet border-t border-site-line bg-site-canvas/95 backdrop-blur-xl md:hidden">
-          <nav aria-label="Hoofdmenu (mobiel)" className="mx-auto flex max-w-[88rem] flex-col px-3 py-2 sm:px-6">
+        <div id="site-menu" className="site-sheet border-b border-site-line bg-site-paper/97 backdrop-blur-xl md:hidden">
+          <nav aria-label="Hoofdmenu (mobiel)" className="mx-auto flex max-w-[120rem] flex-col px-3 py-2 sm:px-6">
             {NAV.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
                 onClick={() => setOpen(false)}
-                className="rounded-ctl px-3 py-3.5 text-base text-site-text transition-colors hover:bg-site-surface-2"
+                className="rounded-ctl px-3 py-3.5 text-base font-medium text-site-ink transition-colors hover:bg-site-paper-2"
               >
                 {item.label}
               </a>
@@ -127,7 +123,7 @@ export function SiteHeader() {
             <Link
               href="/login"
               onClick={() => setOpen(false)}
-              className="rounded-ctl px-3 py-3.5 text-base text-site-text-muted transition-colors hover:bg-site-surface-2"
+              className="rounded-ctl px-3 py-3.5 text-base text-site-muted transition-colors hover:bg-site-paper-2"
             >
               Inloggen
             </Link>
@@ -139,19 +135,18 @@ export function SiteHeader() {
 }
 
 /**
- * Woordmerk: puur typografisch, kleinletter, krappe letterafstand. Het blauwe punt is
- * hetzelfde signaal als het statuslampje in de productpanelen — meer merk heeft dit
- * product niet nodig.
+ * Woordmerk: puur typografisch, kleinletter, krappe letterafstand, met één violette punt.
+ * Geen icoon, geen grafiekje — de naam zelf is het merk.
  */
-export function Wordmark({ ink = false, className = "" }: { ink?: boolean; className?: string }) {
+export function Wordmark({ className = "", large = false }: { className?: string; large?: boolean }) {
   return (
     <span
-      className={`inline-flex items-baseline gap-1 whitespace-nowrap font-display text-[0.9375rem] font-semibold tracking-[-0.035em] ${
-        ink ? "text-white" : "text-site-text"
+      className={`inline-flex items-baseline gap-1.5 whitespace-nowrap font-extrabold tracking-[-0.045em] text-site-ink ${
+        large ? "text-[1.05rem]" : "text-[0.9375rem] 2xl:text-[1.05rem]"
       } ${className}`}
     >
       {SITE.wordmark}
-      <span aria-hidden="true" className={`h-1 w-1 translate-y-[-1px] rounded-full ${ink ? "bg-site-blue-ink" : "bg-site-blue"}`} />
+      <span aria-hidden="true" className="h-[5px] w-[5px] rounded-full bg-site-violet" />
     </span>
   );
 }
