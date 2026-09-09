@@ -1,8 +1,13 @@
 # MMM Refactor Plan
 
-**Status:** voorstel — nog niets geïmplementeerd. Dit document is het resultaat van FASE 0
-(volledige audit, geen codewijzigingen) en is het centrale technische en productmatige plan
-voor de herstructurering.
+**Status:** **uitgevoerd.** Fase 0 (de audit hieronder) is ongewijzigd bewaard als het
+verslag van wat er mis was; fasen 1 t/m 10 uit §10 zijn daarna geïmplementeerd. Zie
+[§0 Uitvoeringsstatus](#0-uitvoeringsstatus) direct hieronder voor wat er precies gebouwd is,
+wat bewust anders is gelopen dan gepland en wat niet gebouwd is. De actuele beschrijving van
+het systeem staat in [`ARCHITECTUUR.md`](./ARCHITECTUUR.md); dit document blijft het *waarom*.
+
+Dit document was het resultaat van FASE 0 (volledige audit, geen codewijzigingen) en is het
+centrale technische en productmatige plan voor de herstructurering.
 
 **Scope van de audit:** de volledige applicatie achter de login — frontend (`app/`,
 `components/`, `lib/`), API-routes, Supabase-schema + RLS, de statistische kern
@@ -23,6 +28,80 @@ aannames; waar een bevinding numeriek is, staat de meting erbij.
 recovery-test draait met één parameterset; er is geen test die de priors op schaal
 controleert, geen test die een niet-verzadigd kanaal terugvindt, en geen test met een
 KPI-week op nul. Alle P0-bevindingen hieronder zitten precies in dat gat.
+
+---
+
+---
+
+## 0. Uitvoeringsstatus
+
+Deze sectie is ná de implementatie toegevoegd. Alles eronder (§1–§14) is het oorspronkelijke
+auditrapport en is bewust niet herschreven: het beschrijft de toestand vóór de refactor.
+
+### Wat er gebouwd is
+
+| Fase (§10) | Status | Belangrijkste bestanden |
+|---|---|---|
+| 1 — P0-bugs | ✅ | `model/fit.py` (NaN→null, veilige MAPE, nullable ROAS), `ingestion/` (encoding/scheidingsteken), storage-pad-IDOR gedicht |
+| 2 — Statistische kern | ✅ | `model/datastats.py`, `model/priors.py`, `model/build.py`, `model/config.py` |
+| 3 — Intent i.p.v. getallen | ✅ | `model/intent.py`, `lib/modelIntent.ts`, `lib/anthropic/architect.ts` |
+| 4 — Diagnostiek en identificeerbaarheid | ✅ | `model/identify.py`, uitgebreide `Diagnostics` in `model/fit.py` |
+| 5 — Validatielaag (4 niveaus) | ✅ | `model/validate.py`, `allowed_outputs` + `allows()` in de frontend |
+| 6 — Worker en state machine | ✅ | `worker/mmm_worker/runner.py`, `ports.py`, `jobspec.py` |
+| 7 — Datamodel en migratie | ✅ | `supabase/migrations/0021_mmm_v2_schema.sql` |
+| 8 — Data-ingestie | ✅ | `ingestion/columns.py` (`validate_columns`, `looks_like_identifier`) |
+| 9 — AI-orkestratie | ✅ | `propose_model_intent` (alleen enums), `/api/fit-refine` geeft voorstellen terug i.p.v. jobs aan te maken |
+| 10 — Opruimen en eindvalidatie | ✅ | eslint in CI, `pymc-marketing` verwijderd, documentatie samengevoegd in `docs/` |
+
+### De kernfout die dit alles rechtvaardigde
+
+De priorschaal groeide mee met het aantal kanalen: bij 1 kanaal impliceerden de priors een
+verwachte media-bijdrage van 0,81× de mediane KPI, bij 8 kanalen 2,28× — het model geloofde
+a priori dat media meer dan het dubbele van de omzet veroorzaakte. `priors.py` legt nu
+expliciet vast dat `E[intercept] + Σ E[beta_c]·E[sat_c]` gelijk is aan de mediane KPI,
+ongeacht het aantal kanalen. Dit is getest, niet aangenomen:
+`test_prior_predictive_kpi_does_not_grow_with_the_number_of_channels` eist dat de spreiding
+over 1–12 kanalen onder 0,05 blijft.
+
+### Waar de uitvoering bewust afweek van het plan
+
+- **Drempel voor `usable_for_decisions`.** Het plan liet dit open (§14). Gekozen is: bovenop
+  de statistische eisen moet elk kanaal waarvoor advies wordt gegeven identificeerbaar zijn
+  (geen contributiecorrelatie boven 0,7 met een ander kanaal) en moet er een geldige
+  holdout-toets zijn. De drempel voor "niet te scheiden" is op 0,7 gezet in plaats van 0,8,
+  omdat 0,8 in de herstelmatrix aantoonbaar collineaire kanalen nog steeds doorliet.
+- **Halfverzadiging als LogNormal in plaats van Beta.** Een Beta op (0,1) kan "dit kanaal is
+  nog lang niet verzadigd" niet uitdrukken — het halfverzadigingspunt kan dan per definitie
+  niet boven de waargenomen maximale druk liggen. Dat is een aanname vermomd als prior.
+- **Extra diagnostiek is standaard aan** (holdout, placebo-kanaal, intervaldekking, prior-
+  sensitiviteit), conform de beslissing van de product owner, ondanks ~2,5× rekentijd.
+- **Geen multi-tenant.** Bewust niet gebouwd; de app is in ontwikkeling. RLS scheidt
+  bouwer/klant, meer niet.
+- **De poller claimt niet.** In het plan stond claiming bij het oppakken. Dat bleek fout: de
+  runner claimt zelf, en twee claims zouden elke run laten stranden. Eén claim, in de runner.
+
+### Wat niet gebouwd is
+
+- **Migratie van bestaande data.** Vervallen: de product owner heeft bevestigd dat alle
+  aanwezige data testdata is. `0021` dropt de oude tabellen in plaats van ze te migreren.
+- **Hiërarchisch model over meerdere klanten.** Verwijderd (`model/hierarchical.py`): het was
+  niet in gebruik, niet gevalideerd, en zonder multi-tenant zonder doel.
+
+### Verificatie na afloop
+
+```
+pytest packages/mmm-core worker/tests   → 401 passed
+pytest packages/mmm-core -m slow        → herstelmatrix (echte NUTS-fit)
+npm run lint / typecheck / build        → schoon (2 waarschuwingen, 0 fouten)
+```
+
+De herstelmatrix is de belangrijkste toevoeging aan de teststrategie: synthetische data met
+bekende waarheid gaat door de *productieweg* (`measure_dataset` → `build_model_config` → fit)
+in zes scenario's — basis, onverzadigd, seizoensverwarring, collineair, telling-KPI en een
+GRP-kanaal dat uit het budgetadvies moet blijven. Bij het collineaire scenario is de eis niet
+dat het model de waarheid vindt, maar dat het **zelf zegt dat het de kanalen niet kan
+scheiden**. Een model dat niet weet wat het niet weet, is precies de fout die dit product
+moet uitsluiten.
 
 ---
 

@@ -6,3 +6,11 @@ build/
 *.tsbuildinfo
 next-env.d.ts
 .claude/hooks/.npm-install-stamp
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/

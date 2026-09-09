@@ -1,3 +1,11 @@
+> **ARCHIEF — beschrijft de oude (v1) applicatie en is NIET meer waar.**
+>
+> Dit is de gebruikershandleiding bij v1, van vóór de refactor van 2026. Sindsdien zijn het databaseschema,
+> de worker, de statistische kern en de AI-laag vervangen; tabellen, statussen en
+> API-routes die hieronder staan bestaan grotendeels niet meer. Bewaard als
+> historische context bij `docs/MMM_REFACTOR_PLAN.md` — gebruik voor de huidige stand
+> `docs/ARCHITECTUUR.md`.
+
 # Handleiding — Een Media Mix Model uitvoeren met de MMM Wizard
 
 **Voor wie:** data-analisten die vanaf nul een Media Mix Model (MMM) opzetten voor een

@@ -1,11 +1,15 @@
-# mmm-wizard (Next.js)
+# MMM Wizard
 
-De **bouwers-app**: een technische operator maakt een project aan, uploadt data,
-configureert het model, start een fit (async op Modal), bekijkt de resultaten met
-onzekerheidsmarges en publiceert een afgeschermd klantdashboard.
+Een tool waarmee een marketeer via chat een **Bayesiaans media mix model** opzet: data
+uploaden, samen met een AI-gids het model opbouwen, en een resultaat krijgen dat eerlijk
+zegt hoe zeker het is. De klant ziet daarna een afgeschermd dashboard met alleen wat
+statistisch verantwoord is om te tonen.
 
-Zie `MMM_README.md` voor het overzicht van het hele project (Python-kern, worker,
-database) en `MMM_APP_OVERDRACHTSDOCUMENT.md` voor een uitgebreide overdrachtsbeschrijving.
+```
+Next.js (Vercel)  ──►  Supabase (Postgres + Storage + Realtime + RLS)  ◄──  Modal (Python worker)
+      │                                                                          │
+      └──────────────────────  Claude API (uitleg + intentie)  ──────────────────┘
+```
 
 ## Draaien
 
@@ -15,56 +19,41 @@ npm install
 npm run dev                          # http://localhost:3000
 ```
 
-Verificatie (projectstandaard — geen testsuite):
+De Python-kant (alleen nodig om de kern of de worker te draaien of te testen):
 
 ```bash
-npm run typecheck    # tsc --noEmit
-npm run build        # next build (lint + types)
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e "packages/mmm-core[model,dev]" -e "worker[dev]"
 ```
+
+## Verificatie
+
+```bash
+npm run lint && npm run typecheck && npm run build   # frontend
+pytest packages/mmm-core                             # statistische kern, snel
+pytest packages/mmm-core -m slow                     # echte NUTS-fit: herstelmatrix
+pytest worker/tests                                  # levenscyclus zonder database
+```
+
+Alle vier draaien ook in CI (`.github/workflows/ci.yml`).
 
 ## Structuur
 
-- `middleware.ts` + `lib/supabase/{client,server}.ts` — Supabase-auth (SSR, publishable key).
-- `lib/auth.ts` — `getViewer()`: ingelogde user + builder-vlag uit `mmm.app_users`.
-- `app/login` — inloggen. `app/projects` — projectenlijst + aanmaken (builder-only).
+| Map | Wat het is |
+|---|---|
+| `app/`, `components/`, `lib/` | Next.js: bouwerswizard + klantdashboard |
+| `packages/mmm-core/` | De statistische kern (ingestie, priors, fit, diagnostiek, oordeel). Kent geen database en geen LLM. |
+| `worker/` | De Modal-worker: state machine, claiming, storage, foutclassificatie. Bevat geen statistiek. |
+| `supabase/migrations/` | Schema + RLS |
+| `docs/` | Architectuur, refactorplan, archief |
+
 - `app/projects/[id]` — de chat-gestuurde wizard: links een doorlopend gesprek dat de
-  bouwer stap voor stap door het hele MMM-proces loodst (8 fases, zie
-  `lib/wizard/phase.ts` + `lib/wizard/script.ts`: data uploaden → data-inspectie &
-  kolomherkenning → data voorbereiden → zakelijke context → parameter-tuning →
-  modelspecificatie → berekenen (Realtime) → valideren & publiceren), rechts een
-  read-only model-dossier met de voortgang en alle vastgelegde kennis
-  (`components/wizard/ChatWizard.tsx`, `components/wizard/ModelDossier.tsx`). De AI
-  (Claude) wordt alleen ingeschakeld bij vrij typen of een expliciet AI-voorstel; de
-  standaardflow is verder volledig deterministisch en kost geen tokens.
-- `app/api/jobs` — job aanmaken (queued) + Modal-worker porren (valt terug op `poll_queue`).
-- `app/api/projects/[id]/publish` — resultaat publiceren naar het klantdashboard.
+  bouwer stap voor stap door het proces loodst (`lib/wizard/`), rechts een read-only
+  model-dossier met de voortgang en alle vastgelegde kennis. De AI wordt alleen
+  ingeschakeld bij vrij typen of een expliciet voorstel; de standaardflow is verder
+  volledig deterministisch en kost geen tokens.
 - `app/dashboard/[projectId]` — **klant-weergave**: alleen gepubliceerde resultaten,
-  read-only, altijd met zichtbare credible intervals. Geen chat, geen ruwe data.
-- `components/SummaryView.tsx` — gedeelde resultatenweergave (builder + klant); de
-  klant ziet een vereenvoudigd vertrouwensoordeel, de bouwer de volledige
-  sampler-/fit-diagnostiek met terugnavigatie naar de betreffende wizardstap.
-
-## Ontwerpfilosofie
-
-Deze app volgt "Don't Make Me Think" (Steve Krug): elke stap moet vanzelfsprekend
-zijn, zonder dat de gebruiker hoeft na te denken over wat iets betekent of wat de
-volgende stap is. In de praktijk betekent dat:
-
-- **Eén duidelijke volgende stap per scherm**, met vaste, geruststellende
-  gesprekstaal (`lib/wizard/script.ts`) — geen jargon (MCMC, posterior,
-  credible intervals) in de altijd-zichtbare UI-tekst.
-- **Standaardwaarden zijn de happy path**: wie het niet zeker weet, klikt op
-  "Laat de AI optimaliseren"; handmatige fijnafstemming staat achter een
-  "geavanceerd"-inklap, nooit in de weg van de volgende stap.
-- **Foutmeldingen zijn mensvriendelijk en oplossingsgericht** (`lib/humanizeMessage.ts`
-  vertaalt elke technische fout naar begrijpelijk Nederlands, met de ruwe melding
-  inklapbaar erbij voor wie het nodig heeft).
-- **Minder is meer**: complexiteit wordt verborgen/verwijderd vóórdat er uitleg
-  wordt toegevoegd — zie `SIMPLIFICATION_PLAN.md` voor de lopende analyse en
-  optimalisatielijst.
-- Dit alles **zonder** de rollen-/RLS-scheiding of de zichtbaarheid van credible
-  intervals in het klantdashboard aan te tasten — versimpelen mag nooit
-  correctheid of vertrouwen opofferen.
+  read-only, altijd met zichtbare onzekerheid. Geen chat, geen ruwe data.
 
 ## Rollen
 
@@ -73,5 +62,19 @@ volgende stap is. In de praktijk betekent dat:
   uitsluitend `/dashboard/<project>`. RLS dwingt dit af — een geraden project-id levert
   niets op.
 
-Auth en toegang worden door Supabase RLS afgedwongen (zie `supabase/migrations/`); deze
-app vertrouwt daarop en checkt de builder-rol daarnaast in de UI voor nette foutmeldingen.
+## Uitgangspunten
+
+1. **Statistische correctheid gaat vóór gemak.** Een model is niet goed omdat het
+   klaar is met rekenen. Elk resultaat krijgt een oordeel in vier niveaus, en dat
+   oordeel bepaalt wat er getoond mag worden — budgetadvies verschijnt niet voor een
+   model dat zijn eigen drempel niet haalt.
+2. **Deterministische software boven LLM-magie.** De AI legt uit, stelt vragen en doet
+   voorstellen in een gesloten woordenschat van enums. Ze schrijft geen modelcode, zet
+   geen priors en start geen berekening. Elke prior wordt in code afgeleid uit intentie
+   plus gemeten data, met herleidbare herkomst.
+3. **Onzekerheid blijft zichtbaar.** Ook — juist — voor de klant.
+4. **De gebruiker hoeft geen statisticus te worden.** Foutmeldingen zijn Nederlands en
+   oplossingsgericht (`lib/humanizeMessage.ts`); een traceback is voor de bouwer.
+
+Meer: [`docs/ARCHITECTUUR.md`](docs/ARCHITECTUUR.md) (hoe het werkt) en
+[`docs/MMM_REFACTOR_PLAN.md`](docs/MMM_REFACTOR_PLAN.md) (waarom het zo werkt).

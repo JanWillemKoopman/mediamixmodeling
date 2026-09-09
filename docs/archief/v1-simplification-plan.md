@@ -1,3 +1,11 @@
+> **ARCHIEF — beschrijft de oude (v1) applicatie en is NIET meer waar.**
+>
+> Dit is de afgerond UX-plan voor v1, van vóór de refactor van 2026. Sindsdien zijn het databaseschema,
+> de worker, de statistische kern en de AI-laag vervangen; tabellen, statussen en
+> API-routes die hieronder staan bestaan grotendeels niet meer. Bewaard als
+> historische context bij `docs/MMM_REFACTOR_PLAN.md` — gebruik voor de huidige stand
+> `docs/ARCHITECTUUR.md`.
+
 # SIMPLIFICATION_PLAN.md — "Don't Make Me Think" voor de MMM-app
 
 > Analyse van de hele MMM-app tegen de designfilosofie van Steve Krug
