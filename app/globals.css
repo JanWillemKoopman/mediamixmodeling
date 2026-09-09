@@ -4,22 +4,20 @@
 
 :root {
   color-scheme: light;
-  /* --font-sans wordt via next/font op <html> gezet (zie layout.tsx). Alleen de
-     mono-stack blijft een systeem-stack: gebruikt voor kleine technische labels. */
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono",
-    monospace;
+  /* --font-sans, --font-display en --font-mono worden via next/font op <html> gezet
+     (zie layout.tsx). */
 }
 
 body {
   @apply bg-bg text-fg antialiased;
 }
 
-/* Strakke, moderne koppen: iets krappere tracking, in dezelfde heldere sans. */
+/* Strakke, moderne koppen: krappere tracking, in dezelfde heldere grotesk. */
 @layer base {
   h1,
   h2,
   h3 {
-    letter-spacing: -0.015em;
+    letter-spacing: -0.02em;
   }
 }
 
@@ -86,5 +84,455 @@ body {
   /* Vermijd dat kaarten/grafieken over een paginarand worden afgekapt. */
   .print-avoid-break {
     break-inside: avoid;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Publieke marketingsite (app/page.tsx + components/site/)
+
+   Alles hieronder is gescopet op #site en de .u-/.site-klassen; de applicatie raakt
+   het niet. Uitgangspunt: de volledige inhoud is standaard zichtbaar en in de
+   eindstand. Pas wanneer er JavaScript is (html.js, gezet vóór de eerste paint in
+   layout.tsx) starten onthullingen en animaties in hun beginstand — zonder JS mist de
+   bezoeker dus beweging, geen informatie.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+#site {
+  /* Designtokens die ook buiten Tailwind bereikbaar moeten zijn: SVG-fills, inline
+     styles en de databalken. Zelfde waarden als de `site.*`-tokens in tailwind.config.ts. */
+  --paper: #ffffff;
+  --paper-2: #f7f7f7;
+  --paper-3: #f0f0f1;
+  --ink: #0b0b0c;
+  --muted: #63636a;
+  --muted-2: #9a9aa2;
+  --line: #e5e5e5;
+  --violet: #8511d9;
+  --green: #b9efa3;
+  --green-text: #24803f;
+
+  --sh-sm: 0 1px 2px rgba(11, 11, 12, 0.04), 0 8px 20px -14px rgba(11, 11, 12, 0.22);
+  --sh-md: 0 2px 6px rgba(11, 11, 12, 0.05), 0 18px 40px -22px rgba(11, 11, 12, 0.34);
+
+  /* Bewegingsritme: één curve, drie snelheden. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 220ms;
+  --base: 460ms;
+  --slow: 900ms;
+
+  color: var(--ink);
+  background: var(--paper);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+.site-anchor {
+  scroll-margin-top: 6rem;
+}
+
+/* ── Typografie ──────────────────────────────────────────────────────────────
+   Kapitale displaykoppen met krappe letterafstand en regelafstand 1, precies zoals
+   de referentie: de kop is een blok, geen zin. */
+
+.u-display {
+  text-transform: uppercase;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-weight: 800;
+  text-wrap: balance;
+}
+
+.u-h1 {
+  font-size: clamp(2.3rem, 5.3vw, 4.6rem);
+}
+.u-h2 {
+  font-size: clamp(1.9rem, 4vw, 3.4rem);
+}
+.u-h3 {
+  font-size: clamp(1.4rem, 2.2vw, 1.9rem);
+  letter-spacing: -0.02em;
+}
+
+/* De tweede regel van een kop krijgt het kleurverloop: groen naar violet. Dit is het
+   enige verloop op tekst en het markeert steeds de belofte, niet de constatering. */
+.u-grad {
+  /* Per regel hetzelfde verloop: breekt de kop over twee regels, dan sweept elke regel
+     opnieuw van groen naar violet in plaats van halverwege af te kappen. */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  background: linear-gradient(96deg, var(--green-text) 0%, var(--violet) 62%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* Zonder achtergrond-clip (oudere browsers) blijft de tekst gewoon donker leesbaar. */
+  -webkit-text-fill-color: transparent;
+}
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .u-grad {
+    color: var(--violet);
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* Microlabel: mono, klein, ruim gespatieerd, kapitaal. Staat boven elke sectie en in
+   elke productkaart — het meest herkenbare detail van het systeem. */
+.u-label {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.u-label-sm {
+  font-size: 0.58rem;
+  letter-spacing: 0.09em;
+}
+
+.u-sub {
+  font-size: clamp(0.98rem, 1.35vw, 1.08rem);
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 58ch;
+}
+
+/* Reusachtig spookwoord achter een sectiekop. Puur ritme; nooit drager van betekenis,
+   dus aria-hidden in de component en niet selecteerbaar. */
+.u-watermark {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.04em;
+  line-height: 0.8;
+  font-size: clamp(3rem, 7.5vw, 7.5rem);
+  color: rgba(11, 11, 12, 0.04);
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Grid- en flexkinderen mogen krimpen. Zonder dit zet de breedste inhoud (een
+   productpaneel, een tabel) de hele kolom vast en loopt de kolom op smalle schermen
+   buiten beeld. Wat écht breed moet blijven, krijgt zelf een eigen scrollcontainer. */
+#site :is(.grid, .flex) > * {
+  min-width: 0;
+}
+
+/* ── Oppervlakken ───────────────────────────────────────────────────────────── */
+
+.u-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--sh-sm);
+}
+.u-card-md {
+  box-shadow: var(--sh-md);
+}
+.u-tile {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--sh-sm);
+}
+.u-inset {
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+}
+
+/* Pil: het chip-formaat van het systeem — mono-label, witte vulling, haarlijn. */
+.u-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 6px 11px;
+  box-shadow: var(--sh-sm);
+  white-space: nowrap;
+}
+.u-pill-green {
+  border-color: rgba(46, 158, 80, 0.28);
+  background: rgba(185, 239, 163, 0.4);
+  color: var(--green-text);
+  box-shadow: none;
+}
+.u-pill-violet {
+  border-color: rgba(133, 17, 217, 0.2);
+  background: rgba(133, 17, 217, 0.09);
+  color: var(--violet);
+  box-shadow: none;
+}
+
+/* ── Knoppen ────────────────────────────────────────────────────────────────── */
+
+.u-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  border-radius: 99px;
+  padding: 11px 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  transition:
+    background-color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+.u-btn:active {
+  transform: translateY(1px);
+}
+.u-btn-primary {
+  background: var(--violet);
+  color: #fff;
+  box-shadow: 0 10px 24px -14px rgba(133, 17, 217, 0.9);
+}
+.u-btn-primary:hover {
+  background: #6d0db3;
+  box-shadow: 0 14px 30px -14px rgba(133, 17, 217, 0.95);
+}
+.u-btn-ghost {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: var(--sh-sm);
+}
+.u-btn-ghost:hover {
+  border-color: rgba(11, 11, 12, 0.28);
+}
+.u-btn-ink {
+  background: var(--ink);
+  color: #fff;
+}
+.u-btn-ink:hover {
+  background: #2a2a2f;
+}
+.u-btn-sm {
+  padding: 8px 15px;
+  font-size: 0.8125rem;
+}
+
+/* ── Beweging ───────────────────────────────────────────────────────────────── */
+
+html.js .site-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+}
+html.js .site-reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 640ms var(--ease) var(--d, 0ms),
+    transform 640ms var(--ease) var(--d, 0ms);
+}
+
+/* Gestaffelde onthulling binnen één figuur: kinderen wachten op de figuur zelf. */
+html.js .site-anim .site-stagger {
+  opacity: 0;
+  transform: translateY(12px);
+}
+html.js .site-anim.is-in .site-stagger {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 540ms var(--ease) var(--d, 0ms),
+    transform 540ms var(--ease) var(--d, 0ms);
+}
+
+/* Databalken: van beginstand (--w0) naar eindstand (--w) zodra de figuur in beeld is. */
+.site-bar {
+  width: var(--w);
+  transition: width var(--slow) var(--ease) var(--d, 0ms);
+}
+html.js .site-anim .site-bar {
+  width: var(--w0, 0%);
+}
+html.js .site-anim.is-in .site-bar {
+  width: var(--w);
+}
+/* Balken die op bediening reageren: korter en directer. */
+.site-bar-live {
+  transition: width 420ms var(--ease);
+}
+
+/* Lijnen die zichzelf tekenen; --len is de padlengte. */
+.site-draw {
+  stroke-dasharray: var(--len);
+  stroke-dashoffset: 0;
+}
+html.js .site-anim .site-draw {
+  stroke-dashoffset: var(--len);
+}
+html.js .site-anim.is-in .site-draw {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1200ms var(--ease) var(--d, 0ms);
+}
+html.js .site-anim .site-fade {
+  opacity: 0;
+}
+html.js .site-anim.is-in .site-fade {
+  opacity: 1;
+  transition: opacity 700ms var(--ease) var(--d, 300ms);
+}
+
+/* Statuslampje in productkaarten: rustig ademend, nooit knipperend. */
+@keyframes site-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+.site-pulse {
+  animation: site-pulse 2600ms var(--ease) infinite;
+}
+
+/* Zachte kleurvelden achter de opening en de slotsectie. Geen zwevende vormen: twee
+   brede, bijna onzichtbare vegen die het wit warmte geven. */
+.u-wash::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 42% at 14% 8%, rgba(185, 239, 163, 0.42), transparent 68%),
+    radial-gradient(40% 44% at 88% 4%, rgba(133, 17, 217, 0.12), transparent 70%);
+}
+
+/* ── Bediening ──────────────────────────────────────────────────────────────── */
+
+.site-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 40px;
+  background: transparent;
+  cursor: pointer;
+}
+.site-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 99px;
+  background: var(--line);
+}
+.site-range::-moz-range-track {
+  height: 3px;
+  border-radius: 99px;
+  background: var(--line);
+}
+.site-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 24px;
+  width: 24px;
+  margin-top: -10.5px;
+  border-radius: 99px;
+  background: var(--violet);
+  border: 3px solid #fff;
+  box-shadow: 0 4px 12px -4px rgba(133, 17, 217, 0.8);
+  transition: transform var(--fast) var(--ease);
+}
+.site-range::-moz-range-thumb {
+  height: 24px;
+  width: 24px;
+  border-radius: 99px;
+  background: var(--violet);
+  border: 3px solid #fff;
+  box-shadow: 0 4px 12px -4px rgba(133, 17, 217, 0.8);
+}
+.site-range:hover::-webkit-slider-thumb {
+  transform: scale(1.08);
+}
+.site-range:focus-visible {
+  outline: none;
+}
+.site-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(133, 17, 217, 0.28);
+}
+.site-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px rgba(133, 17, 217, 0.28);
+}
+
+/* Toetsenbordfocus is overal zichtbaar. */
+#site a:focus-visible,
+#site button:focus-visible,
+#site summary:focus-visible,
+#site input:focus-visible,
+#site select:focus-visible,
+#site textarea:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+#site .on-ink a:focus-visible,
+#site .on-ink button:focus-visible,
+#site .on-ink input:focus-visible,
+#site .on-ink select:focus-visible,
+#site .on-ink textarea:focus-visible {
+  outline-color: var(--green);
+}
+
+/* Mobiel menu: schuift open vanuit de header. */
+@keyframes site-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.site-sheet {
+  animation: site-sheet-in 240ms var(--ease) both;
+}
+
+/* Beweging is nooit de drager van betekenis: uit betekent direct de eindstand. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  html.js .site-reveal,
+  html.js .site-reveal.is-in,
+  html.js .site-anim .site-stagger,
+  html.js .site-anim.is-in .site-stagger {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  html.js .site-anim .site-bar,
+  html.js .site-anim.is-in .site-bar {
+    width: var(--w);
+    transition: none;
+  }
+  html.js .site-anim .site-draw,
+  html.js .site-anim.is-in .site-draw {
+    stroke-dashoffset: 0;
+    transition: none;
+  }
+  html.js .site-anim .site-fade,
+  html.js .site-anim.is-in .site-fade {
+    opacity: 1;
+    transition: none;
+  }
+  .site-bar-live {
+    transition: none;
+  }
+  .site-pulse {
+    animation: none;
+    opacity: 1;
+  }
+  .site-sheet {
+    animation: none;
   }
 }
