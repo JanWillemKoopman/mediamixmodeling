@@ -306,22 +306,23 @@ verouderd is (`stale`).
 
 ## 6. Fasering
 
-Elke fase eindigt met `npm run lint && npm run typecheck && npm run build` plus de tests van die fase.
-De bestaande wizard blijft werken tot fase 3 klaar is; daarna wordt hij in één keer verwijderd.
+Elke fase eindigt met `npm run lint && npm run typecheck && npm run build`, plus: **alle zes invarianten
+uit §8.2 groen op alle bereikbare toestanden**. De bestaande wizard blijft werken tot fase 3 klaar is;
+daarna wordt hij in één keer verwijderd.
 
 | Fase | Inhoud | Resultaat |
 |---|---|---|
-| **0. Fundament** | Migratie (`project_steps`, transcript-velden), `lib/flow/steps.ts` + `state.ts` + tests | Flow-toestand is afleidbaar en getest, nog niets zichtbaar veranderd |
+| **0. Fundament** | Migratie (`project_steps`, transcript-velden), `lib/flow/steps.ts` + `state.ts`, de zes invarianten en de route-bestaan-test | De flow-toestand is afleidbaar, en het net waarin elke latere fase valt hangt er al |
 | **1. Skelet** | Rail, conversatie met persistent transcript, kaart-raamwerk, nieuwe projectpagina | Je kunt door een leeg traject lopen; alles blijft na refresh staan |
 | **2. Data-stappen** | Stap 1 t/m 4 (doel, aanleveren, kolommen, klaarmaken) | Van CSV tot goedgekeurde dataset in de nieuwe flow |
 | **3. Model-stappen** | Stap 5 en 6 (wat weet jij al, controleren en rekenen); oude wizard eruit | Volledige weg tot een lopende berekening |
-| **4. Uitkomst** | Stap 7 en 8, automatische gelaagde interpretatie, stap-terug bij afgekeurd model | De gebruiker begrijpt zijn uitkomst zonder te hoeven vragen |
+| **4. Uitkomst** | Stap 7 en 8, automatische gelaagde interpretatie, stap-terug bij afgekeurd model, doorloop met een echte niet-technische gebruiker | De gebruiker begrijpt zijn uitkomst zonder te hoeven vragen — en dat is waargenomen, niet aangenomen |
 | **5. AI-laag** | Per-stap prompts, opgeschoonde tools, prompt-drift weg | De gids is consistent en zegt niets over knoppen die niet bestaan |
 | **6. Afronden** | Tests, `docs/ARCHITECTUUR.md` en `docs/HANDLEIDING.md` bijwerken, dode code weg | Klaar, gedocumenteerd, in CI geborgd |
 
-Voorstel voor tests: **vitest** toevoegen voor `deriveFlowState`, de stap-poorten en de
-`allows()`-gating van de uitkomstlagen. Dat zijn pure functies; het is goedkoop en het bewaakt precies
-de regels die niet mogen verschuiven. (Nieuwe dev-dependency — expliciete keuze, zie §8.)
+Tests draaien op **vitest** (besluit 4 in §9) en dekken drie dingen: de invarianten uit §8.2 over alle
+bereikbare toestanden, de simulatie-doorloop op de demo-CSV uit §8.3, en het golden transcript van de
+gidsteksten. De CI-job `frontend` krijgt `npm test` naast lint, typecheck en build.
 
 ---
 
@@ -338,7 +339,102 @@ de regels die niet mogen verschuiven. (Nieuwe dev-dependency — expliciete keuz
 
 ---
 
-## 8. Vastgelegde besluiten
+## 8. Hoe we een bugvrije, gestroomlijnde ervaring borgen
+
+"Bugvrij" is geen belofte die iemand waar kan maken. Wat wél kan: de **categorieën** afsluiten
+waarin de huidige fouten vallen, en wat overblijft toetsen met invarianten in plaats van met losse
+testgevallen. De acht gevonden problemen in §2 zijn geen toevalligheden — het zijn acht categorieën
+met elk een structurele oorzaak.
+
+### 8.1 Laag 1 — De categorie onmogelijk maken
+
+| Fout nu | Waarom hij kon ontstaan | Waarom hij straks niet uit te drukken is |
+|---|---|---|
+| Transcript weg na refresh | Gespreksverloop in React-state náást de waarheid in de database | Er is geen client-state meer voor het transcript; de conversatie wordt server-side gerenderd uit één tabel. Wat je niet in de client bewaart, kun je daar niet verliezen. |
+| Getypte `1` betekent per stap iets anders; verouderd menu blijft geldig | Keuze wordt uit vrije tekst geraden, los van de stap waar hij bij hoort | Een keuze is een `{step, action}`-paar dat de server toetst tegen de *actieve* stap. Een actie voor een niet-actieve stap wordt geweigerd, niet verkeerd gelezen. De parser bestaat niet meer. |
+| Tekst belooft proefdraai en geavanceerde instellingen | Copy is een los artefact naast de mogelijkheden | Wat de gebruiker kán doen, wordt gerenderd uit de gedeclareerde acties van de stap. Proza beschrijft alleen het waarom. Een knop die niet bestaat, kan niet in beeld komen. |
+| `GET /api/model-configurations/[id]` bestaat niet | `fetch("/api/…")` is voor de compiler een string als elke andere | Alle aanroepen via één getypte client-module, plus een test die elke `/api/…`-string in de codebase naast de aanwezige routebestanden legt. |
+| Prompt noemt velden die niet meer bestaan | Prompt is proza, tools zijn types — twee bronnen | Het deel van de prompt dat velden en toegestane waarden opsomt, wordt gegenereerd uit dezelfde enums als `lib/types.ts`. Een verwijderd veld verdwijnt automatisch uit de prompt. |
+| Vinkje bij een overgeslagen stap | Afgeleid uit positie (`done = i < activeStep`) | Elke stap heeft een `isDone(snapshot, ledger)`-predikaat. Een vinkje is een feit, geen indexvergelijking. |
+| Teruggaan breekt stilzwijgend wat erna kwam | Geen verouderingsmodel; client-only override | Elke stap declareert waar hij van afhangt. Een wijziging markeert afhankelijke stappen `stale` en toont dat. |
+| `busy` / `delegatedBusy` / `pendingProposal` die uit de pas lopen | Handgerolde concurrency in vier losse booleans | Eén toestand per stap; de server is de autoriteit en geeft de nieuwe toestand terug. Er is geen tweede plek die kan afwijken. |
+
+Acht van de acht zijn categorie-eliminaties, geen reparaties. Dat is de kern van de garantie: deze
+fouten worden niet "minder waarschijnlijk", ze worden onuitdrukbaar.
+
+### 8.2 Laag 2 — Zes invarianten, getoetst over álle bereikbare toestanden
+
+Niet "we hebben een paar paden getest", maar: deze eigenschappen gelden voor elke toestand waarin de
+flow kan komen. Samen zijn ze de operationele definitie van "gestroomlijnd".
+
+1. **Nooit een doodlopende toestand.** Elke bereikbare toestand heeft minstens één zichtbare
+   vervolgactie, óf een expliciet "dit is klaar". Dit is de invariant die "ik weet niet wat ik nu moet
+   doen" onmogelijk maakt.
+2. **De getoonde stap volgt uit de feiten.** Er is geen UI-tak die een stap toont die snapshot +
+   grootboek niet ondersteunen.
+3. **Geen getal zonder zijn oordeel.** Elke uitkomstlaag hangt aan `allows(validation, …)`. Getoetst
+   over alle vier de niveaus × alle lagen: bij `not_usable` en `technically_completed` komt er geen
+   enkel kanaalgetal doorheen.
+4. **Elke fout heeft mensentaal én een uitweg.** Voor elke `RunErrorCode` en elke blokkerende
+   kwaliteitscode bestaat een tekst én een actie die ergens naartoe leidt. De registers bestaan al
+   (`lib/humanizeMessage.ts`, `lib/qualityIssueRegistry.ts`); dit maakt volledigheid een testbare eis.
+5. **Onomkeerbaar betekent bevestigd.** Samenvoegen, goedkeuren, rekenen en publiceren zijn gemarkeerd
+   als bevestigingsplichtig en kunnen alleen via een scherm dat vooraf toont wat er gaat gebeuren.
+   Getoetst: geen enkele blijvende actie zonder die markering.
+6. **Elke stap is af te ronden zonder te typen** — behalve de twee waar vrije tekst de inhoud zélf is
+   (bedrijfscontext, en vragen aan de gids). Dit is de operationele definitie van "geen technische
+   kennis nodig".
+
+### 8.3 Laag 3 — De doorloop als test
+
+- **Simulatie-doorloop (snel, in CI).** Eén test loopt als gebruiker de hele weg af op de meegeleverde
+  demo-CSV (`demo_data/mediamarkt_demo_dataset.csv` — met opzet de lastige gevallen: `folder_oplage`
+  en `email_verzendingen` zijn geen euro's, en die verwarring is precies wat een budgetadvies
+  betekenisloos maakt), met de worker gemockt. Bij élke tussenliggende toestand worden de zes
+  invarianten gecontroleerd. Dit is de test die de ervaring als geheel bewaakt in plaats van losse
+  functies.
+- **Echte doorloop (Playwright, nachtelijk of handmatig).** Dezelfde weg in een echte browser met een
+  screenshot per stap. Vangt wat een unit-test niet ziet: layout, scrollgedrag, bereikbaarheid van een
+  knop.
+- **Golden transcript.** De vaste gidsteksten van alle acht stappen in één snapshotbestand. Een
+  wijziging in de begeleiding wordt zichtbaar in de diff van een pull request, in plaats van pas bij
+  een gebruiker.
+
+### 8.4 De getallen in de interpretatie komen niet uit de LLM
+
+Stap 7 laat de gids uitleggen wat de uitkomst betekent. Daar zit het enige echte hallucinatie-risico
+van het hele product: een verzonnen percentage in een zin die verder klopt, is niet te onderscheiden
+van een juist percentage.
+
+Daarom: **elk getal in de interpretatie wordt door code gerenderd uit `FitSummary`**, met de bandbreedte
+erbij; de gids schrijft uitsluitend de verbindende duiding eromheen. Een controle achteraf toetst dat
+elk getal in de gegenereerde tekst herleidbaar is tot de samenvatting. Dit geldt ook voor de bestaande
+`/api/analysis` en `/api/client-summary`.
+
+### 8.5 Wat hiermee níét gegarandeerd is
+
+Eerlijk, zodat de verwachting klopt:
+
+1. **Of de teksten begrijpelijk zijn voor jouw doelgroep.** Geen enkele test vervangt één sessie met
+   iemand die het product niet kent en zonder hulp het demo-project doorloopt. Dat is een expliciete
+   oplevering van fase 4, niet een optioneel extraatje.
+2. **De formulering van de gids.** De structuur is getest en de getallen zijn geborgd (§8.4); of een
+   zin prettig leest, blijft een menselijk oordeel.
+3. **Alles achter de startknop.** Worker en statistische kern blijven ongemoeid en hebben hun eigen
+   suite (403 tests plus de herstelmatrix). De flow raakt ze alleen via bestaande routes.
+
+### 8.6 Wat dit betekent voor de fasering
+
+- Fase 0 levert de zes invarianten en de route-bestaan-test **vóór** er UI is, zodat elke latere fase
+  eraan getoetst wordt in plaats van achteraf.
+- Elke fase sluit af met "alle invarianten groen op alle bereikbare toestanden", niet alleen met
+  lint / typecheck / build.
+- De CI-job `frontend` krijgt `npm test` erbij.
+- Fase 4 levert de gebruikersdoorloop met een echte niet-technische gebruiker op.
+
+---
+
+## 9. Vastgelegde besluiten
 
 Bevestigd door de product owner voordat de bouw begint:
 
