@@ -79,6 +79,12 @@ over 1–12 kanalen onder 0,05 blijft.
   bouwer/klant, meer niet.
 - **De poller claimt niet.** In het plan stond claiming bij het oppakken. Dat bleek fout: de
   runner claimt zelf, en twee claims zouden elke run laten stranden. Eén claim, in de runner.
+- **Niet-identificeerbare kanalen gaan niet mee in de herverdeling, maar blokkeren het model
+  ook niet.** De herstelmatrix legde bloot dat de optimizer alleen op eenheid filterde, dus
+  een kanaal dat niet los vast te stellen was ging gewoon mee in het budgetadvies. Die
+  kanalen worden nu vastgezet op hun huidige niveau. Daardoor kon de omgekeerde regel losser:
+  één onscheidbaar paar in een model met zes kanalen legde eerst ook het advies over de andere
+  vier stil (`RULESET_VERSION` 2024.2).
 
 ### Wat niet gebouwd is
 
@@ -90,8 +96,8 @@ over 1–12 kanalen onder 0,05 blijft.
 ### Verificatie na afloop
 
 ```
-pytest packages/mmm-core worker/tests   → 401 passed
-pytest packages/mmm-core -m slow        → herstelmatrix (echte NUTS-fit)
+pytest packages/mmm-core worker/tests   → 403 passed
+pytest packages/mmm-core -m slow        → 15 passed (echte NUTS-fits, 9 m 36 s)
 npm run lint / typecheck / build        → schoon (2 waarschuwingen, 0 fouten)
 ```
 
