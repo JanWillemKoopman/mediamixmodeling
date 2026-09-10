@@ -213,3 +213,21 @@ def test_a_real_channel_that_happens_to_rest_at_zero_is_not_called_binary():
     data = _frame(radio_spend=flighted)
     result = validate_columns(data, _roles(radio_spend="spend"))
     assert not [f for f in result.for_column("radio_spend") if f.code == "binary_column_as_spend"]
+
+
+def test_a_spend_column_whose_name_says_volume_is_flagged():
+    """`email_verzendingen` als euro's behandelen geeft het een rendement per euro en een
+    plek in de budgetverdeling — allebei betekenisloos. Een waarschuwing, geen blokkade:
+    de eenheid wordt elders vastgelegd en de naam is een aanwijzing, geen bewijs."""
+    data = _frame(email_verzendingen=np.abs(np.random.default_rng(1).normal(180_000, 20_000, N)))
+    result = validate_columns(data, _roles(email_verzendingen="spend"))
+    finding = next(f for f in result.for_column("email_verzendingen"))
+    assert finding.code == "spend_column_may_be_volume"
+    assert finding.severity == "warning"
+    # Een waarschuwing mag de bouw niet tegenhouden.
+    assert result.ok
+
+
+def test_a_normal_spend_column_is_not_flagged_as_volume():
+    data = _frame(radio_spend=np.abs(np.random.default_rng(2).normal(20_000, 4_000, N)))
+    assert not validate_columns(data, _roles(radio_spend="spend")).for_column("radio_spend")

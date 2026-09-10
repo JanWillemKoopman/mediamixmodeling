@@ -17,7 +17,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { currencyChannels, totalMediaSpend, volumeChannels } from "@/lib/dashboardInsights";
+import {
+  currencyChannels,
+  markUnreportable,
+  totalMediaSpend,
+  unreportableChannels,
+  unreportableNote,
+  volumeChannels,
+} from "@/lib/dashboardInsights";
 import type { BaselineDecomposition, FitSummary, ResponseCurve, WeeklyDecomposition } from "@/lib/types";
 
 // Deterministic, zero-cost charts drawn straight from the numbers already in FitSummary —
@@ -470,21 +477,27 @@ function RoasOverTimeChart({ weekly }: { weekly: WeeklyDecomposition }) {
 // De waterval: van "niets doen" (basislijn) trede voor trede omhoog naar het
 // modeltotaal — de statische, presentatieklare tweeling van de opbouwgrafiek.
 function WaterfallChart({ summary }: { summary: FitSummary }) {
+  const unreportable = unreportableChannels(summary);
   const steps = [...summary.channels]
     .sort((a, b) => b.absolute_contribution.p50 - a.absolute_contribution.p50)
-    .map((ch) => ({ name: ch.name, value: ch.absolute_contribution.p50 }));
+    .map((ch) => ({
+      name: markUnreportable(ch.name, unreportable),
+      value: ch.absolute_contribution.p50,
+      unreportable: unreportable.has(ch.name),
+    }));
   const baseline = summary.baseline_contribution.p50;
   let cum = baseline;
   const rows: { name: string; base: number; value: number; fill: string }[] = [
     { name: "Basislijn", base: 0, value: baseline, fill: BASELINE_FILL },
   ];
   for (const s of steps) {
+    const fill = s.unreportable ? NEUTRAL : ACCENT;
     if (s.value >= 0) {
-      rows.push({ name: s.name, base: cum, value: s.value, fill: ACCENT });
+      rows.push({ name: s.name, base: cum, value: s.value, fill });
       cum += s.value;
     } else {
       cum += s.value;
-      rows.push({ name: s.name, base: cum, value: -s.value, fill: DANGER });
+      rows.push({ name: s.name, base: cum, value: -s.value, fill: s.unreportable ? NEUTRAL : DANGER });
     }
   }
   rows.push({ name: "Totaal (model)", base: 0, value: cum, fill: INK });
@@ -492,7 +505,10 @@ function WaterfallChart({ summary }: { summary: FitSummary }) {
   return (
     <ChartCard
       title={`Van basislijn naar totaal — wie droeg wat bij?`}
-      hint="Elke trede is de geschatte bijdrage (mediaan) over de hele periode; de laatste balk is het modeltotaal."
+      hint={
+        "Elke trede is de geschatte bijdrage (mediaan) over de hele periode; de laatste balk is het modeltotaal." +
+        unreportableNote(unreportable)
+      }
     >
       <ResponsiveContainer width="100%" height={Math.max(140, rows.length * 30)} className="overflow-hidden">
         <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 24, bottom: 0, left: 4 }}>
@@ -571,10 +587,11 @@ function SpendVsReturnChart({ summary, kpiMargin }: { summary: FitSummary; kpiMa
   const comparable = toMoney != null;
   const factor = toMoney ?? 1;
 
+  const unreportable = unreportableChannels(summary);
   const data = [...summary.channels]
     .sort((a, b) => b.absolute_contribution.p50 - a.absolute_contribution.p50)
     .map((ch) => ({
-      name: ch.name,
+      name: markUnreportable(ch.name, unreportable),
       kosten: ch.total_spend,
       opbrengst: Math.max(0, ch.absolute_contribution.p50) * factor,
       errorRange: [
@@ -588,8 +605,8 @@ function SpendVsReturnChart({ summary, kpiMargin }: { summary: FitSummary; kpiMa
       title="Wat kostte het, wat leverde het op?"
       hint={
         comparable
-          ? `Per kanaal: grijs = uitgegeven, groen = geschatte opbrengst in euro's (met onzekerheidsstreep). Beide in euro's, dus: is de groene balk langer dan de grijze, dan verdiende het kanaal zichzelf terug.`
-          : `Per kanaal: grijs = uitgegeven in euro's, groen = geschatte opbrengst in ${summary.kpi}. Dat zijn verschillende eenheden, dus ze hebben elk een eigen as en zegt de lengte niets over terugverdienen. Vul bij stap 3 de marge per ${summary.kpi} in, dan zetten we ze allebei in euro's naast elkaar.`
+          ? `Per kanaal: grijs = uitgegeven, groen = geschatte opbrengst in euro's (met onzekerheidsstreep). Beide in euro's, dus: is de groene balk langer dan de grijze, dan verdiende het kanaal zichzelf terug.${unreportableNote(unreportable)}`
+          : `Per kanaal: grijs = uitgegeven in euro's, groen = geschatte opbrengst in ${summary.kpi}. Dat zijn verschillende eenheden, dus ze hebben elk een eigen as en zegt de lengte niets over terugverdienen. Vul bij stap 3 de marge per ${summary.kpi} in, dan zetten we ze allebei in euro's naast elkaar.${unreportableNote(unreportable)}`
       }
     >
       <ResponsiveContainer width="100%" height={Math.max(140, data.length * 44)} className="overflow-hidden">
@@ -637,8 +654,9 @@ function BudgetVsEffectChart({ summary }: { summary: FitSummary }) {
   const totalSpend = paid.reduce((s, ch) => s + ch.total_spend, 0);
   const totalEffect = paid.reduce((s, ch) => s + Math.max(0, ch.absolute_contribution.p50), 0);
   if (totalSpend <= 0 || totalEffect <= 0) return null;
+  const unreportable = unreportableChannels(summary);
   const data = paid.map((ch) => ({
-    name: ch.name,
+    name: markUnreportable(ch.name, unreportable),
     budget: (ch.total_spend / totalSpend) * 100,
     effect: (Math.max(0, ch.absolute_contribution.p50) / totalEffect) * 100,
   }));
@@ -862,10 +880,12 @@ export function ResultsCharts({
   // Only currency channels, and only those that actually spent: "return per e-mail sent"
   // cannot share an axis with a euro break-even line, and a channel with no spend has no
   // return at all.
+  const unreportable = unreportableChannels(summary);
   const roasData = summary.channels
     .filter((ch) => ch.unit === "currency" && ch.roas)
     .map((ch) => ({
-      name: ch.name,
+      name: markUnreportable(ch.name, unreportable),
+      unreportable: unreportable.has(ch.name),
       p50: ch.roas!.p50,
       errorRange: [ch.roas!.p50 - ch.roas!.p3, ch.roas!.p97 - ch.roas!.p50] as [number, number],
       p3: ch.roas!.p3,
@@ -939,10 +959,10 @@ export function ResultsCharts({
           title="Rendement per kanaal (ROAS)"
           hint={
             kpiMargin != null
-              ? `Rechts van de stippellijn verdient een kanaal zichzelf écht terug: bij €${fmt(kpiMargin, 2)} marge per ${marginUnit} ligt break-even bij ROAS ${fmt(1 / kpiMargin, 2)}. Groen = vrijwel zeker winstgevend; grijs = nog niet te zeggen; rood = vrijwel zeker verliesgevend.`
+              ? `Rechts van de stippellijn verdient een kanaal zichzelf écht terug: bij €${fmt(kpiMargin, 2)} marge per ${marginUnit} ligt break-even bij ROAS ${fmt(1 / kpiMargin, 2)}. Groen = vrijwel zeker winstgevend; grijs = nog niet te zeggen; rood = vrijwel zeker verliesgevend.${unreportableNote(unreportable)}`
               : breakEven != null
-                ? "Rechts van de stippellijn (1,0) levert een kanaal meer op dan het kost. Let op: échte winstgevendheid hangt van je marge af — vul bij stap 3 de gemiddelde marge per verkocht product in voor de eerlijke break-evenlijn. Groen = vrijwel zeker boven break-even; grijs = nog niet te zeggen; rood = vrijwel zeker eronder."
-                : `Je KPI staat in aantallen, dus dit is ${summary.kpi} per bestede euro — niet omzet per euro. Waar break-even ligt hangt af van je marge: vul bij stap 3 de gemiddelde marge per ${marginUnit} in, dan tekenen we de lijn en kleuren we de kanalen.`
+                ? `Rechts van de stippellijn (1,0) levert een kanaal meer op dan het kost. Let op: échte winstgevendheid hangt van je marge af — vul bij stap 3 de gemiddelde marge per verkocht product in voor de eerlijke break-evenlijn. Groen = vrijwel zeker boven break-even; grijs = nog niet te zeggen; rood = vrijwel zeker eronder.${unreportableNote(unreportable)}`
+                : `Je KPI staat in aantallen, dus dit is ${summary.kpi} per bestede euro — niet omzet per euro. Waar break-even ligt hangt af van je marge: vul bij stap 3 de gemiddelde marge per ${marginUnit} in, dan tekenen we de lijn en kleuren we de kanalen.${unreportableNote(unreportable)}`
           }
         >
           <ResponsiveContainer width="100%" height={roasHeight} className="overflow-hidden">
@@ -959,7 +979,7 @@ export function ResultsCharts({
                   <Cell
                     key={d.name}
                     fill={
-                      breakEven == null
+                      breakEven == null || d.unreportable
                         ? NEUTRAL
                         : d.p3 >= breakEven
                           ? SUCCESS

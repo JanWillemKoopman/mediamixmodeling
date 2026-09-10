@@ -19,7 +19,7 @@ import traceback
 import numpy as np
 import pandas as pd
 
-from mmm_core import build_master_dataset
+from mmm_core import build_master_dataset, validate_columns
 
 from mmm_worker.jobspec import SpecError, parse_prepare_recipe, source_transforms_map
 from mmm_worker.ports import DatasetStore, ErrorCode, Storage, USER_MESSAGES
@@ -28,7 +28,7 @@ from mmm_worker.tables import read_table
 _PREVIEW_ROWS = 6
 
 
-def _suitability(report) -> dict:
+def _suitability(report, extra_issues: list | None = None) -> dict:
     """The quality report, structured so the app can show cause *and* next step per issue."""
     return {
         "issues": [
@@ -41,13 +41,15 @@ def _suitability(report) -> dict:
             }
             for i in report
         ]
+        + list(extra_issues or [])
     }
 
 
-def _verdict(report) -> str:
-    if report.has_errors:
+def _verdict(report, extra_issues: list | None = None) -> str:
+    extra = list(extra_issues or [])
+    if report.has_errors or any(i["severity"] == "error" for i in extra):
         return "not_usable"
-    return "usable_with_warnings" if report.warnings else "usable"
+    return "usable_with_warnings" if report.warnings or extra else "usable"
 
 
 def _rows(frame: pd.DataFrame) -> list[dict]:
@@ -83,6 +85,67 @@ def _preview(data: pd.DataFrame, column_roles: dict) -> dict:
     }
 
 
+# Findings that are a plain statement about the values, not a heuristic. Only these stop a
+# build. `looks_like_identifier` is deliberately not here: it is a good hint and a bad gate —
+# a KPI that happens to rise every single week trips it, and a user staring at step 4 has no
+# way to overrule it. Those arrive as warnings in the quality report instead.
+_BLOCKING_ROLE_CODES = frozenset(
+    {
+        "column_missing",
+        "not_numeric",
+        "date_does_not_parse",
+        "negative_spend",
+        "all_zero_channel",
+        "binary_column_as_spend",
+        "constant_control",
+        "kpi_not_positive",
+        "kpi_barely_varies",
+    }
+)
+
+
+def _validate_declared_roles(frames) -> list:
+    """Run the column validation over each raw source before anything is aggregated.
+
+    `validate_columns` has existed in mmm-core since the refactor and was never called from
+    anywhere: the roles are decided in the web step, which is TypeScript, and the worker went
+    straight from recipe to `build_master_dataset`. So an entire layer of checks — an order
+    id proposed as a channel, a constant control, a KPI with nothing to explain, a 0/1
+    campaign flag booked as media pressure — sat there judging nothing.
+
+    Here is the first point where the declared roles and the raw values meet in one process,
+    so this is where it belongs. Structural checks stay off: they ask whether the set as a
+    whole has a date, a KPI and channels, and one source of a multi-file model legitimately
+    holds only some of those. That question is already answered by the merge itself.
+    """
+    issues = []
+    for spec, frame in frames:
+        roles = {col.name: col.role.value for col in spec.columns if col.name in frame.columns}
+        if spec.date_column and spec.date_column in frame.columns:
+            roles[spec.date_column] = "date"
+        if not roles:
+            continue
+        for finding in validate_columns(frame, roles, include_structural=False).findings:
+            blocking = finding.severity == "blocking" and finding.code in _BLOCKING_ROLE_CODES
+            issues.append(
+                {
+                    "code": finding.code,
+                    "severity": "error" if blocking else "warning",
+                    "message": finding.message,
+                    "source": spec.name,
+                    "details": {
+                        "column": finding.column,
+                        **(
+                            {"suggested_role": finding.suggested_role.value}
+                            if finding.suggested_role is not None
+                            else {}
+                        ),
+                    },
+                }
+            )
+    return issues
+
+
 def build_dataset_version(
     datasets: DatasetStore,
     storage: Storage,
@@ -108,13 +171,33 @@ def build_dataset_version(
             frames.append((ref.spec, read_table(ref.storage_path, raw)))
         datasets.heartbeat(dataset_id)
 
+        # Before building, not after: a role that cannot hold is a fact about the upload,
+        # and merging four years of weeks to discover it wastes the work and reports the
+        # same problem twice (mmm_core.ingestion keeps its own fallback check for callers
+        # that never came through here).
+        role_issues = _validate_declared_roles(frames)
+        blocking_roles = [i for i in role_issues if i["severity"] == "error"]
+        if blocking_roles:
+            reason = "; ".join(i["message"] for i in blocking_roles)
+            datasets.mark_failed(
+                dataset_id,
+                code=ErrorCode.DATA_QUALITY,
+                user_message=f"{USER_MESSAGES[ErrorCode.DATA_QUALITY]}\n\n{reason}",
+                technical=reason,
+            )
+            return {
+                "status": "failed",
+                "code": ErrorCode.DATA_QUALITY,
+                "suitability": {"issues": role_issues},
+            }
+
         build = build_master_dataset(
             frames,
             event_dummies=list(spec.event_dummies),
             features=list(spec.features),
             source_transforms=source_transforms_map(spec.sources),
         )
-        suitability = _suitability(build.report)
+        suitability = _suitability(build.report, role_issues)
 
         if build.report.has_errors or build.window is None:
             reason = "; ".join(i.message for i in build.report.errors) or "geen overlappende periode"
@@ -147,7 +230,7 @@ def build_dataset_version(
             frequency="weekly",
             column_roles=column_roles,
             suitability=suitability,
-            verdict=_verdict(build.report),
+            verdict=_verdict(build.report, role_issues),
             preview=_preview(build.data, column_roles),
         )
         return {"status": "ready", "dataset_id": dataset_id, "master_path": master_path}

@@ -155,3 +155,60 @@ def test_a_failure_never_leaves_the_row_building():
     store = _store()
     build_dataset_version(store, FakeStorage({}), "ds-1")
     assert store.dataset["status"] != "building"
+
+
+# --- the column validation, finally connected ----------------------------------------
+
+FLAG_CSV = "date,burst\n" + "".join(
+    f"2024-{1 + i // 4:02d}-{1 + (i % 4) * 7:02d},{1 if 10 <= i < 20 else 0}\n" for i in range(40)
+)
+
+FLAG_RECIPE = {
+    "sources": [
+        {
+            "source_file_id": "file-kpi",
+            "name": "sales",
+            "date_column": "week",
+            "columns": [{"name": "revenue", "role": "kpi"}],
+        },
+        {
+            "source_file_id": "file-spend",
+            "name": "tv",
+            "date_column": "date",
+            "columns": [{"name": "burst", "role": "spend"}],
+        },
+    ]
+}
+
+
+def test_a_campaign_flag_declared_as_spend_stops_the_build():
+    """The MediaMarkt case: a 0/1 column booked as a channel. Its "total spend" becomes a
+    week count and its ROAS lands in the hundreds. Nothing used to look at this, because
+    validate_columns was never called from anywhere."""
+    store = FakeDatasetStore(
+        {"id": "ds-1", "project_id": "proj-1", "recipe": FLAG_RECIPE},
+        storage_paths={"file-kpi": "proj-1/kpi.csv", "file-spend": "proj-1/flag.csv"},
+    )
+    storage = FakeStorage({"proj-1/kpi.csv": KPI_CSV.encode(), "proj-1/flag.csv": FLAG_CSV.encode()})
+
+    result = build_dataset_version(store, storage, "ds-1")
+
+    assert result["status"] == "failed"
+    assert result["code"] == ErrorCode.DATA_QUALITY
+    codes = [i["code"] for i in result["suitability"]["issues"]]
+    assert "binary_column_as_spend" in codes
+    issue = next(i for i in result["suitability"]["issues"] if i["code"] == "binary_column_as_spend")
+    assert issue["severity"] == "error"
+    assert issue["details"]["suggested_role"] == "control"
+
+
+def test_a_heuristic_finding_warns_but_does_not_stop_the_build():
+    """`looks_like_identifier` is a hint, not a fact: a KPI that rises every single week
+    trips it, and from step 4 there is no way to overrule a blocked build."""
+    store, storage = _store(), _storage()
+    result = build_dataset_version(store, storage, "ds-1")
+
+    assert result["status"] == "ready"
+    warnings = [i for i in store.ready["suitability"]["issues"] if i["code"] == "looks_like_identifier"]
+    assert warnings, "the finding should still be reported"
+    assert all(w["severity"] == "warning" for w in warnings)

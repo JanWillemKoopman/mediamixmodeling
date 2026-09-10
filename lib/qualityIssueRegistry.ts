@@ -23,6 +23,11 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
       "Negatieve uitgaven (refunds, correcties) bestaan boekhoudkundig, maar het model interpreteert spend als mediadruk — negatieve druk bestaat niet en verstoort de adstock-schatting.",
     action: "Beschrijf dit aan de architect — die stelt een passende opschoonstap voor.",
   },
+  spend_column_may_be_volume: {
+    explain:
+      "De naam van deze kolom wijst op een aantal (verzendingen, vertoningen, kliks) in plaats van een bedrag. Alleen een kolom in euro's krijgt een rendement per euro en telt mee in de budgetverdeling.",
+    action: "Klopt het dat dit een volume is? Zeg het, dan zetten we de juiste eenheid erop.",
+  },
   binary_column_as_spend: {
     explain:
       "Deze kolom bevat alleen 0 en 1 — een campagnekalender, geen mediadruk. Als kanaal krijgt hij een verzadigingscurve over het bereik 0–1, een 'totale spend' die eigenlijk een weekteller is, en een rendement dat daardoor nergens op slaat.",

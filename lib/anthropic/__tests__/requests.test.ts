@@ -83,9 +83,28 @@ function userText(content: unknown): string {
     .join("\n");
 }
 
-function payloadOf(text: string): Record<string, unknown> {
-  const start = text.indexOf("{");
-  return JSON.parse(text.slice(start)) as Record<string, unknown>;
+/** Het eerste complete JSON-object uit de tekst — er kunnen er meer dan één in staan. */
+function payloadOf(text: string, occurrence = 1): Record<string, unknown> {
+  let from = 0;
+  for (let n = 0; n < occurrence; n++) {
+    const start = text.indexOf("{", from);
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const c = text[i];
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = !inString;
+      else if (!inString && c === "{") depth++;
+      else if (!inString && c === "}" && --depth === 0) {
+        if (n === occurrence - 1) return JSON.parse(text.slice(start, i + 1)) as Record<string, unknown>;
+        from = i + 1;
+        break;
+      }
+    }
+  }
+  throw new Error(`geen JSON-object #${occurrence} gevonden`);
 }
 
 describe("de klantsamenvatting", () => {
@@ -123,6 +142,25 @@ describe("de uitgebreide analyse", () => {
     const payload = payloadOf(userText(buildDeepAnalysisRequest(SUMMARY).messages[0].content));
     // Hier worden grafieken van gemaakt; zonder reeks is er niets te plotten over de tijd.
     expect(payload).toHaveProperty("weekly");
+  });
+
+  it("stuurt de cijfers mee die het scherm zelf toont, zodat er niet twee versies ontstaan", () => {
+    // 66% naast 70% voor hetzelfde basislijn-aandeel: de analyse leidde het zelf af uit
+    // basislijn/(basislijn+media) terwijl het scherm door de werkelijke KPI deelt.
+    const text = userText(buildDeepAnalysisRequest(SUMMARY).messages[0].content);
+    expect(text).toContain("afgeleide_cijfers");
+    const derived = payloadOf(text, 2);
+    expect(derived).toHaveProperty("basislijn_aandeel_pct");
+    expect(derived).toHaveProperty("totale_media_uitgaven_euro");
+    expect(derived).toHaveProperty("geen_apart_cijfer");
+    expect(derived).toHaveProperty("niet_in_euros");
+  });
+
+  it("verbiedt het herleiden van die cijfers en het toewijzen van brede marges", () => {
+    const system = buildDeepAnalysisRequest(SUMMARY).system as string;
+    expect(system).toContain("afgeleide_cijfers");
+    expect(system).toMatch(/niet zelf opnieuw uit|NIET zelf/);
+    expect(system).toContain("wat de gebruiker wel of niet heeft ingevuld");
   });
 
   it("verstuurt compacte JSON", () => {

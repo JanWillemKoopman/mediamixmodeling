@@ -31,6 +31,8 @@ Vorm van het bestand:
 - layout: "breed" (één kolom per kanaal) of "lang" (een kanaalnaam-kolom + een waarde-kolom die per rij een ander kanaal beschrijft) of "onbekend".
 - currency: de valuta als die te herleiden is (bv. "EUR"), anders null.
 
+Geef bij elke spend-kolom ook "unit". Dat is geen bijzaak: alleen een kolom in euro's krijgt een rendement per euro en doet mee in de budgetverdeling. Een kolom in verzendingen, vertoningen, GRP's of kliks als 'currency' aanmerken levert een ROAS op die nergens op slaat. Zegt de kolomnaam of de ordegrootte dat het een volume is, kies dan die eenheid.
+
 Geef per kolom een confidence ("hoog"/"middel"/"laag") en, bij twijfel, een korte "meaning" die de bouwer kan controleren. Roep altijd de tool "classify_columns" aan.`;
 
 const CLASSIFY_TOOL: Anthropic.Tool = {
@@ -51,7 +53,15 @@ const CLASSIFY_TOOL: Anthropic.Tool = {
             name: { type: "string" },
             role: { type: "string", enum: ["kpi", "spend", "control", "date", "ignore"] },
             meaning: { type: "string", description: "Wat de kolom meet, in gewone taal." },
-            unit: { type: "string", description: "Eenheid zoals 'euro', 'cent', 'clicks'; laat weg indien onbekend." },
+            unit: {
+              type: "string",
+              enum: ["currency", "impressions", "grp", "sendings", "clicks"],
+              description:
+                "Waarin de kolom meet. 'currency' = een bedrag (euro's). Kies een van de andere " +
+                "waarden zodra het een volume is: verzendingen/mailings = 'sendings', " +
+                "vertoningen/impressies/bereik = 'impressions', tv-druk = 'grp', kliks = 'clicks'. " +
+                "Laat weg als je het echt niet weet — nooit gokken op 'currency'.",
+            },
             confidence: { type: "string", enum: ["hoog", "middel", "laag"] },
           },
           required: ["name", "role", "meaning", "confidence"],

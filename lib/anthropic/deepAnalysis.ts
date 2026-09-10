@@ -1,5 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ANALYST_MODEL } from "@/lib/ai/guide";
+import {
+  moneyKpis,
+  totalMediaSpend,
+  unreportableChannels,
+  volumeChannels,
+} from "@/lib/dashboardInsights";
 import type { FitSummary } from "@/lib/types";
 
 // Step 3 — deep-dive analysis: a distinct, explicitly-triggered action (not the chat
@@ -30,10 +36,32 @@ Wat te doen:
 
 Regels:
 - Gebruik uitsluitend de cijfers uit de gegeven FitSummary-JSON; verzin nooit een getal.
+- Bij de JSON zit een blok "afgeleide_cijfers". Díé getallen neem je letterlijk over voor het basislijn-aandeel, de totale mediabestedingen en het rendement per euro — je rekent ze NIET zelf opnieuw uit. De app toont dezelfde getallen aan de gebruiker, en een analyse die er zelf een tweede versie van afleidt spreekt het scherm ernaast tegen.
+- Kanalen in "afgeleide_cijfers.geen_apart_cijfer" hebben geen betrouwbare eigen schatting. Noem ze niet in een rangorde en gebruik ze niet in een advies; zeg wat er niet over te zeggen valt.
+- Kanalen in "afgeleide_cijfers.niet_in_euros" staan in een andere eenheid (verzendingen, vertoningen). Reken die nooit om naar euro's en tel ze niet op bij een bedrag.
+- Waarom een marge breed is, weet je alleen als het uit de JSON blijkt (bijvoorbeeld sterk overlappende kanalen). Speculeer niet over de oorzaak, en wijs die in geen geval toe aan wat de gebruiker wel of niet heeft ingevuld — dat staat niet in deze gegevens.
 - Nederlandse aslabels en titels; getallen in de eenheid van de KPI.
 - Compacte, professionele stijl (geen felle kleuren, geen 3D, geen overbodige legenda's).
 - Schrijf de tekst voor een marketeer zonder statistiekachtergrond: geen statistisch jargon (anomalie, outlier, posterior, Bayesiaans), kort van stof, en zet het advies vooraan in plaats van pas aan het eind.
 - Sluit af met tekst, niet met een grafiek — de lezer leest de analyse na de grafieken.`;
+
+/**
+ * De cijfers die de app zelf toont, meegegeven zodat de analyse ze niet opnieuw afleidt.
+ *
+ * Zonder dit rekende de analyse het basislijn-aandeel uit als basislijn/(basislijn+media)
+ * terwijl het scherm basislijn/werkelijke KPI toont — twee getallen voor dezelfde grootheid
+ * in één rapport (66% naast 70%). Wie dat leest, weet niet meer welk cijfer geldt.
+ */
+function derivedFigures(summary: FitSummary) {
+  const money = moneyKpis(summary);
+  return {
+    basislijn_aandeel_pct: money.baselineSharePct,
+    totale_media_uitgaven_euro: totalMediaSpend(summary),
+    kpi_per_bestede_euro: money.blendedRoas,
+    geen_apart_cijfer: [...unreportableChannels(summary)],
+    niet_in_euros: volumeChannels(summary).map((c) => ({ naam: c.name, eenheid: c.unit })),
+  };
+}
 
 export function buildDeepAnalysisRequest(summary: FitSummary): Anthropic.Beta.Messages.MessageCreateParamsNonStreaming {
   return {
@@ -57,7 +85,10 @@ export function buildDeepAnalysisRequest(summary: FitSummary): Anthropic.Beta.Me
             type: "text",
             // Compacte JSON, geen indentatie: de helft van de tekens in een doorgeïndenteerde
             // FitSummary zijn spaties, en het model leest de structuur er even goed uit.
-            text: `Hier is de FitSummary van de laatste fit:\n\n${JSON.stringify(summary)}`,
+            text:
+              `Hier is de FitSummary van de laatste fit:\n\n${JSON.stringify(summary)}` +
+              `\n\nafgeleide_cijfers (neem letterlijk over, niet zelf herberekenen):\n` +
+              `${JSON.stringify(derivedFigures(summary))}`,
             // Het breekpunt staat hier, en wel hierom: deze aanvraag is geen enkele beurt. Een
             // code_execution-lus pauzeert na tien gereedschapsstappen (stop_reason
             // "pause_turn"), en hervatten betekent dezelfde aanvraag nog eens versturen met de

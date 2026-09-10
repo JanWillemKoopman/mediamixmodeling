@@ -27,6 +27,38 @@ export function totalMediaSpend(summary: FitSummary): number {
   return currencyChannels(summary).reduce((s, ch) => s + ch.total_spend, 0);
 }
 
+/**
+ * Kanalen waarvoor het model geen apart cijfer kan geven.
+ *
+ * Die worden terecht buiten het budgetadvies gehouden, maar hun getallen stonden onbenoemd
+ * in de waterval, de ROAS-grafiek en kosten-vs-opbrengst — als metingen, tussen de
+ * metingen. Bij MediaMarkt was dat radio: het rapport zei "hier kan ik geen apart cijfer
+ * voor geven" en toonde vervolgens 140.483, een factor 3,4 boven de waarheid.
+ *
+ * Uit het TOTAAL blijven ze wél meetellen. De som over alle kanalen is beter geschat dan
+ * elk deel apart — het model kent de gezamenlijke mediabijdrage, alleen de verdeling niet.
+ * Ze eruit laten zou het totaal juist verslechteren. Het is de per-kanaal-weergave die
+ * moet zeggen wat je niet mag aflezen.
+ */
+export function unreportableChannels(summary: FitSummary): Set<string> {
+  return new Set(
+    (summary.validation?.per_channel ?? []).filter((c) => !c.usable).map((c) => c.name),
+  );
+}
+
+/** Achtervoegsel voor zo'n kanaal in een as-label, met de voetnoot die erbij hoort. */
+export const UNREPORTABLE_MARK = "†";
+
+export function markUnreportable(name: string, unreportable: Set<string>): string {
+  return unreportable.has(name) ? `${name} ${UNREPORTABLE_MARK}` : name;
+}
+
+export function unreportableNote(unreportable: Set<string>): string {
+  if (unreportable.size === 0) return "";
+  const names = [...unreportable].join(", ");
+  return ` ${UNREPORTABLE_MARK} Voor ${names} kan het model geen apart cijfer geven; die balk is een schatting die vrijwel volledig uit de aanname komt. Lees 'm niet als meting — in het totaal telt hij wel mee.`;
+}
+
 /** Kanalen die wél druk hebben maar niet in euro's — apart te noemen, nooit op te tellen. */
 export function volumeChannels(summary: FitSummary): ChannelResult[] {
   return summary.channels.filter((ch) => ch.unit !== "currency" && ch.total_spend > 0);
