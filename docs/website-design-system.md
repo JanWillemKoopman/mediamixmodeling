@@ -1,86 +1,92 @@
-# Ontwerpsysteem — publieke marketingsite
+# Ontwerpsysteem en opbouw — publieke marketingsite
 
 De publieke site (`app/page.tsx` + `components/site/`) is een eigen systeem, náást de
 applicatie. De app-tokens (wizard, klantdashboard) veranderen er niet van mee en andersom.
 
-## 1. Kleur
+## 1. Het verhaal
 
-Alle sitekleuren staan als `site.*` in `tailwind.config.ts`; dezelfde waarden staan als CSS
-custom properties op `#site` in `app/globals.css` (voor SVG's en inline styles).
+De site is geen verzameling blokken maar één doorlopend verhaal in negen hoofdstukken. Elk
+hoofdstuk heeft ruimte voor tekst én precies één visualisatie; de bezoeker bouwt begrip op in
+plaats van elke honderd pixels opnieuw een belofte te lezen.
+
+| # | Sectie | Anker | Wat het hoofdstuk doet |
+| --- | --- | --- | --- |
+| 1 | `Hero` | `#top` | De vraag, en meteen het beeld: budget → kanalen → resultaat → geschatte bijdrage |
+| 2 | `MeasurementSection` | `#meten` | Waarom die vraag vandaag moeilijk te beantwoorden is |
+| 3 | `PerspectiveSection` | `#perspectief` | Attributie volgt één reis; MMM kijkt naar het geheel |
+| 4 | `ModelSection` | `#model` | Wat de analyse oplevert: resultaat, factoren, bijdrage met marge |
+| 5 | `DecisionSection` | `#beslissing` | Twee budgetverdelingen naast elkaar, interactief |
+| 6 | `OutcomesSection` | `#inzichten` | Wat je uiteindelijk krijgt, als één opsomming |
+| 7 | `ProcessSection` | `#werkwijze` | De route van data naar besluit, compact |
+| 8 | `AudienceSection` | — | Voor wie dit relevant is |
+| 9 | `CtaSection` | `#demo` | De uitnodiging en het formulier |
+
+## 2. Kleur
+
+Sitekleuren staan als `site.*` in `tailwind.config.ts`; dezelfde waarden staan als CSS custom
+properties op `#site` in `app/globals.css` (voor SVG's en inline styles).
 
 | Rol | Token | Waarde |
 | --- | --- | --- |
-| Paginavlak | `site-canvas` | `#FAFBFC` |
-| Kaart | `site-surface` / wit | `#FFFFFF` |
-| Getint vlak | `site-surface-2` | `#F3F5F8` |
-| Donker vlak | `site-ink` | `#080C16` |
-| Paneel op donker | `site-ink-2` | `#0F1526` |
-| Tekst | `site-text` | `#0B1020` |
-| Tekst secundair | `site-text-muted` | `#525C74` |
-| Lijn | `site-line` | `rgba(11,16,32,0.09)` |
-| Accent / actie | `site-blue` | `#1F5AFF` |
-| Accent op donker | `site-blue-ink` | `#7FA6FF` |
+| Papier | `site-paper` | `#FFFFFF` |
+| Genest vlak | `site-paper-2` / `-3` | `#F7F7F7` / `#F0F0F1` |
+| Inkt | `site-ink` | `#0B0B0C` |
+| Lopende tekst | `site-muted` | `#63636A` |
+| Bijschrift | `site-muted-2` | `#9A9AA2` |
+| Lijn | `site-line` | `#E5E5E5` |
+| Actie | `site-violet` | `#8511D9` |
+| Effect (tekst) | `site-green-text` | `#24803F` |
+| Effect (vlak) | `site-green` | `#B9EFA3` |
 
-**Kleurregel van de hele site:** bestedingen zijn neutraal-grijs (`SPEND_STEPS`), effect is
-blauw (`EFFECT_STEPS`). Er is geen derde signaalkleur. Identiteit hangt nooit alleen aan
-kleur: elk segment heeft een label en een tekstequivalent.
+**Regel:** bestedingen zijn neutraal grijs, geschatte bijdrage is groen, en violet is
+voorbehouden aan actie en aan het alternatieve scenario. Meer kleuren gebruikt de site niet.
 
-## 2. Typografie
+## 3. Typografie
 
-- **Inter** — UI en broodtekst (`font-sans`), gewichten 400/500/600.
-- **Inter Tight** — koppen (`font-display`), 500/600, tracking `-0.02em` tot `-0.04em`.
-- **JetBrains Mono** — technische microlabels, assen, metrics (`font-mono`), 400.
+Eén familie: **Plus Jakarta Sans** (400–800), self-hosted via `next/font`. Microlabels draaien
+op de systeem-mono, wat een webfont scheelt.
 
-Koppen: `clamp()` op elke sectiekop via `SectionHead`. Broodtekst maximaal ~65 tekens breed.
+- `.u-display` — kapitaal, `letter-spacing -.03em`, `line-height 1`, gewicht 800.
+- `.u-h1` / `.u-h2` / `.u-h3` — de drie kopmaten, alle drie met `clamp()`.
+- `.u-grad` — de tweede regel van een kop, met verloop groen → violet.
+- `.u-label` — mono, klein, ruim gespatieerd, kapitaal: het meest herkenbare detail.
+- `.u-sub` — introtekst, `max-width 58ch`.
+- `.u-watermark` — reusachtig lichtgrijs woord achter een sectiekop, puur ritme.
 
-## 3. Ruimte, radius, schaduw
+## 4. Oppervlakken en knoppen
 
-- Container: `max-w-[76rem]`, productpanelen `max-w-[88rem]` (`Container wide`).
-- Sectie: `py-20 sm:py-28 lg:py-32`, anker-offset via `.site-anchor`.
-- Radius: `rounded-ctl` (10px) knoppen/velden, `rounded-card` (14px) kaarten,
-  `rounded-panel` (20px) productpanelen.
-- Schaduw: `shadow-site-card` (bijna plat), `shadow-site-lift`, `shadow-site-panel` (alleen
-  het hero-paneel), `shadow-site-ink` (donkere secties).
+`.u-card` (radius 22px) voor productpanelen, `.u-tile` (16px) voor kleine kaarten, `.u-inset`
+(13px) voor genestelde vlakken, `.u-pill` voor chips. Knoppen zijn pillen: `.u-btn-primary`
+(violet), `.u-btn-ghost` (wit met haarlijn). Container: `max-w-[120rem]`, `px-5 xl:px-16`.
 
-## 4. Beweging
+## 5. Beweging
 
-Eén curve (`cubic-bezier(0.22,1,0.36,1)`), drie snelheden (`--fast/--base/--slow`). Beweging
-verklaart altijd iets; er is geen decoratieve animatie.
+Eén curve (`cubic-bezier(0.22,1,0.36,1)`), drie snelheden. Beweging verklaart altijd iets.
 
-- `Reveal` — tekst/kaart komt van onderaf in beeld.
-- `Anim` — figuurwrapper; zet `is-in` waarna `.site-bar`, `.site-bar-v`, `.site-draw`,
-  `.site-fade` en `.site-stagger` naar hun eindstand gaan.
-- `useCountUp` — getallen tellen op (rAF).
-- `useStepper` — verhalende panelen lopen standen af; klikken pint de stand vast.
+- `Reveal` — tekst en kaarten komen van onderaf in beeld.
+- `Anim` — figuurwrapper; zet `is-in`, waarna `.site-bar`, `.site-draw`, `.site-fade` en
+  `.site-stagger` naar hun eindstand gaan.
+- `useCountUp` — getallen tellen op; `useStepper` — verhalende panelen lopen standen af.
 
-Regels: zonder JavaScript staat alles in de eindstand (`html.js` wordt vóór de eerste paint
-gezet). Bij `prefers-reduced-motion: reduce` idem — geen enkele overgang.
+Zonder JavaScript en bij `prefers-reduced-motion` staat alles direct in de eindstand.
 
-## 5. Claimregels
+## 6. Claimregels
 
 Alle cijfers komen uit `lib/site/exampleData.ts` en zijn synthetisch. Elke visualisatie draagt
-zichtbaar het label "Voorbeelddata"; de case draagt "Illustratief voorbeeld — niet gebaseerd op
-klantdata". Effect wordt altijd geformuleerd als schatting mét bandbreedte ("geschatte
-bijdrage", "geschat effect"), nooit als voorspelling of garantie. Er staan geen verzonnen
-klantlogo's, quotes of resultaten op de site.
-
-## 6. Een echte case toevoegen
-
-`ProofSection` is al gebouwd op de zes velden in `PROOF_SLOTS` (`lib/site/copy.ts`): sector,
-mediabudget, kanalen & historie, belangrijkste inzicht, budgetbeslissing, gemeten resultaat.
-Vervang die tekstuele slots door de echte gegevens zodra een klant akkoord geeft; de
-voorbeeldcase in `CaseSection` blijft daarnaast staan als publiek, controleerbaar voorbeeld.
+zichtbaar het label "Illustratief voorbeeld". Effect wordt altijd geformuleerd als schatting
+mét bandbreedte, nooit als voorspelling of garantie. Er staan geen verzonnen klantnamen,
+logo's, quotes of resultaten op de site.
 
 ## 7. Bestandsindeling
 
 ```
 app/page.tsx              compositie, metadata, JSON-LD
 components/site/
-  primitives.tsx          Container, Section, SectionHead, Eyebrow, Button, paneel-chrome
+  primitives.tsx          Container, Section, SectionHead, Label, Button, kaartchrome
   motion.tsx              useInView, Reveal, Anim, useCountUp, useStepper
   SiteHeader / SiteFooter navigatie en voettekst (woordmerk zit in SiteHeader)
-  Hero + HeroConsole      opening en het interactieve productpaneel
-  <Sectie>Section.tsx     één bestand per sectie, in de volgorde van de pagina
+  Hero + HeroFlow         hoofdstuk 1 en de openingsvisual
+  <Hoofdstuk>Section.tsx  één bestand per hoofdstuk, in de volgorde van de pagina
 lib/site/copy.ts          alle lijst- en navigatiecopy
 lib/site/exampleData.ts   alle cijfers, kleurschalen en het scenariomodel
 ```
