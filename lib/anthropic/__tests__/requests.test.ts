@@ -59,7 +59,7 @@ const SUMMARY: FitSummary = {
   identifiability: [],
   weekly: {
     dates,
-    observed: series,
+    actual: series,
     expected_p50: series,
     expected_p3: series,
     expected_p97: series,
