@@ -90,10 +90,13 @@ async function handlePost(request: Request) {
   // Het breekpunt staat op het LAATSTE systeemblok, niet op de stabiele kern ervoor.
   //
   // Dat is geen smaakkwestie: een prefix onder het minimum van het model wordt stilzwijgend
-  // niet gecachet — geen foutmelding, alleen `cache_creation_input_tokens: 0`. GUIDE_SYSTEM is
-  // ~700 tokens en het minimum van Sonnet 5 is 1024, dus een breekpunt daar deed letterlijk
-  // niets. Systeem + briefing samen komen er ruim boven, en binnen één stap is die combinatie
-  // stabiel over opeenvolgende vragen — precies het geval dat hergebruik oplevert.
+  // niet gecachet — geen foutmelding, alleen `cache_creation_input_tokens: 0`. Dat minimum
+  // verschilt per model (512 tokens voor het model dat hier nu staat, 1024 voor de kleinere),
+  // en GUIDE_SYSTEM is met ~700 tokens precies de maat die bij het ene model wél en bij het
+  // andere níet gecachet wordt. Systeem + briefing samen komen er in beide gevallen ruim
+  // boven, en binnen één stap is die combinatie stabiel over opeenvolgende vragen — precies
+  // het geval dat hergebruik oplevert. Eén breekpunt hier is dus houdbaar als het model
+  // verschuift; een breekpunt op de kern alleen was dat niet.
   //
   // De gespreksgeschiedenis staat ná het breekpunt: die groeit elke beurt en zou de prefix
   // anders bij elke vraag opnieuw ongeldig maken.
@@ -137,10 +140,27 @@ async function handlePost(request: Request) {
           (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "propose_beliefs",
         );
         const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
-        const reply =
-          textBlocks.map((b) => b.text).join("\n\n").trim() ||
-          ((toolUse?.input as { reasoning?: string } | undefined)?.reasoning ?? "") ||
-          "Ik heb hier geen aanvulling op.";
+        const written = textBlocks.map((b) => b.text).join("\n\n").trim();
+
+        // Een antwoord kan halverwege worden afgebroken door een filter aan de kant van het
+        // model (`stop_reason: "refusal"`). Dat is iets anders dan een leeg antwoord, en het
+        // mag niet als "ik heb hier geen aanvulling op" in het transcript belanden: de
+        // gebruiker ziet dan een halve alinea met een nietszeggende afsluiting en weet niet
+        // dat er iets is weggevallen. Wat er stond blijft staan, met erachter waarom het
+        // ophoudt.
+        const refused = response.stop_reason === "refusal";
+        const reply = refused
+          ? [
+              written,
+              "Mijn antwoord is hier afgebroken door een controle aan de kant van het model — " +
+                "niet door iets in jouw project. Stel je vraag anders, of vraag het in kleinere " +
+                "stukken.",
+            ]
+              .filter(Boolean)
+              .join("\n\n")
+          : written ||
+            ((toolUse?.input as { reasoning?: string } | undefined)?.reasoning ?? "") ||
+            "Ik heb hier geen aanvulling op.";
 
         // Vastleggen in het transcript: de vraag en het antwoord, allebei als gewoon gesprek.
         // Een tool-aanroep wordt niet opgeslagen als tool-blok — het voorstel leeft in de kaart,
@@ -164,7 +184,7 @@ async function handlePost(request: Request) {
           },
         ]);
 
-        send({ type: "done", reply, proposal: toolUse ? toolUse.input : null });
+        send({ type: "done", reply, proposal: toolUse && !refused ? toolUse.input : null });
       } catch (err) {
         send({ type: "error", error: claudeErrorMessage(err) });
       } finally {

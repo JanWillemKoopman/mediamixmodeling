@@ -52,7 +52,23 @@ export function buildDeepAnalysisRequest(summary: FitSummary): Anthropic.Beta.Me
     messages: [
       {
         role: "user",
-        content: `Hier is de FitSummary van de laatste fit:\n\n${JSON.stringify(summary, null, 2)}`,
+        content: [
+          {
+            type: "text",
+            // Compacte JSON, geen indentatie: de helft van de tekens in een doorgeïndenteerde
+            // FitSummary zijn spaties, en het model leest de structuur er even goed uit.
+            text: `Hier is de FitSummary van de laatste fit:\n\n${JSON.stringify(summary)}`,
+            // Het breekpunt staat hier, en wel hierom: deze aanvraag is geen enkele beurt. Een
+            // code_execution-lus pauzeert na tien gereedschapsstappen (stop_reason
+            // "pause_turn"), en hervatten betekent dezelfde aanvraag nog eens versturen met de
+            // gepauzeerde beurt erachter — zie app/api/analysis/route.ts. Zonder breekpunt
+            // wordt deze JSON, de grootste invoer in de hele applicatie, bij elke hervatting
+            // opnieuw vol betaald. Met breekpunt kost de eerste beurt 1,25× en elke hervatting
+            // 0,1×; vanaf ruim één beurt gemiddeld is dat winst, en bij vier beurten is het
+            // het verschil tussen viermaal en anderhalfmaal betalen.
+            cache_control: { type: "ephemeral" },
+          },
+        ],
       },
     ],
   };

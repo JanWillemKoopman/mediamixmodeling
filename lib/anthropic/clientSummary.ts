@@ -23,6 +23,26 @@ Regels:
 - Geen aanhef, geen afsluitende groet — dit is de inhoud van een rapportpagina.
 - Lengte: compact genoeg om voor te dragen (richtlijn: 350-500 woorden).`;
 
+/**
+ * Wat er van de FitSummary meegaat naar het model.
+ *
+ * De twee weekreeksen eruit, en dat is geen zuinigheid om de zuinigheid: `weekly` en
+ * `baseline_decomposition` zijn samen het overgrote deel van de JSON (een reeks van ~150
+ * weken × KPI, baseline, elk kanaal, elke control) en ze dragen niets bij aan wat deze
+ * samenvatting doet. Die gaat over het geheel — aandeel per kanaal, rendement per euro,
+ * waar de verzadiging begint — en noemt per definitie geen afzonderlijke week. Een reeks
+ * van honderden getallen meesturen nodigt juist uit tot het tegenovergestelde: een zin over
+ * "week 34" die de lezer niet kan plaatsen.
+ *
+ * Let op wat dit NIET raakt: de getallencontrole in app/api/client-summary/route.ts krijgt de
+ * volledige samenvatting uit de database, niet deze. Een getal uit de weekreeksen blijft dus
+ * toegestaan als het er onverhoopt tóch in staat — er wordt niets strenger of losser van.
+ */
+function forTheSummary(summary: FitSummary): Omit<FitSummary, "weekly" | "baseline_decomposition"> {
+  const { weekly: _weekly, baseline_decomposition: _baseline, ...rest } = summary;
+  return rest;
+}
+
 export function buildClientSummaryRequest(summary: FitSummary): Anthropic.MessageCreateParamsNonStreaming {
   return {
     model: ANALYST_MODEL,
@@ -33,7 +53,9 @@ export function buildClientSummaryRequest(summary: FitSummary): Anthropic.Messag
     messages: [
       {
         role: "user",
-        content: `Hier is de FitSummary van de gepubliceerde/beste run:\n\n${JSON.stringify(summary, null, 2)}`,
+        // Compacte JSON, geen indentatie: het model leest de structuur even goed zonder, en
+        // de spaties waren ongeveer de helft van de invoer.
+        content: `Hier is de FitSummary van de gepubliceerde/beste run:\n\n${JSON.stringify(forTheSummary(summary))}`,
       },
     ],
   };

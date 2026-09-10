@@ -16,7 +16,7 @@ const CODE_EXECUTION_BETA = "code-execution-2025-08-25";
 const FILES_BETA = "files-api-2025-04-14";
 // The brains step. Kept on the same model as the rest of the architect for cost; point it at
 // a stronger model (e.g. claude-opus-4-8) if the inspections warrant it.
-export const INSPECTION_MODEL = "claude-sonnet-5";
+export const INSPECTION_MODEL = "claude-opus-5";
 
 const SYSTEM_INSTRUCTIONS = `Je bent een senior data-analist die marketingdata voorbereidt voor een Media Mix Model (MMM). Je krijgt één of meer CSV-bestanden in de code-execution-omgeving. Onderzoek de data GRONDIG met Python (pandas) en rapporteer wat een MMM-bouwer moet weten VOORDAT hij een model configureert.
 

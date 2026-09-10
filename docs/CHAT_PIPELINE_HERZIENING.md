@@ -482,3 +482,68 @@ Bevestigd door de product owner voordat de bouw begint:
    overal een volwaardig, gelijkwaardig zichtbaar antwoord dat het model gewoon de data laat bepalen.
 4. **Vitest wordt toegevoegd** voor de flow-logica: stap-afleiding, de poorten tussen stappen en de
    `allows()`-gating van de uitkomstlagen. Draait mee in CI naast lint, typecheck en build.
+
+---
+
+## 10. Welk model waar, en wat een doorloop kost
+
+### 10.1 De drie rollen
+
+Er zijn precies drie plekken waar een model wordt gekozen, en elke keuze staat in één constante:
+
+| Rol | Constante | Waar | Waarom daar |
+| --- | --- | --- | --- |
+| De gids | `GUIDE_MODEL` (`lib/ai/guide.ts`) | `/api/flow/ask` | Elke vraag van de gebruiker. Korte invoer, redeneert over de briefing, moet in gewone taal uitleggen. |
+| De schrijver | `ANALYST_MODEL` (`lib/ai/guide.ts`) | klantsamenvatting, uitgebreide analyse | Twee lange schrijfklussen op de FitSummary, allebei expliciet door de gebruiker gestart. |
+| De inspecteur | `INSPECTION_MODEL` (`lib/anthropic/dataInspection.ts`) | `/api/inspect` | Verkent de volledige CSV met Python in de sandbox. |
+| Het sorteerwerk | `CLASSIFY_MODEL` (`lib/anthropic/columnMapping.ts`) | kolomrollen voorstellen | Geen redeneerwerk: honderden kolomnamen in een vast schema duwen. Bewust het kleinste en snelste model; de gebruiker bevestigt elke rol alsnog zelf. |
+
+De eerste drie staan op het zwaarste model, de vierde op het kleinste. Die constantes zijn de enige
+waarheid — er staat nergens een modelnaam in een prompt, een component of een migratie.
+
+### 10.2 Wat de rekening bepaalt
+
+Niet het aantal vragen aan de gids: een vraag kost systeem (~700 tokens) plus briefing
+(~400–700) plus de gespreksgeschiedenis, en daarvan wordt alles vóór de geschiedenis hergebruikt
+uit de cache. Twintig vragen in één stap kosten minder dan één uitgebreide analyse.
+
+De rekening zit in de FitSummary. Gemeten op een echte run (geschat op ~3,0 tekens per token,
+want in deze omgeving is er geen sleutel om `count_tokens` te bevragen):
+
+| Vorm | Tokens |
+| --- | --- |
+| Doorgeïndenteerd, volledig | ~52.400 |
+| Compact, volledig | ~27.100 |
+| Doorgeïndenteerd, zonder weekreeksen | ~18.700 |
+| Compact, zonder weekreeksen | ~9.600 |
+
+Drie ingrepen volgen daaruit, en ze zitten er alle drie in:
+
+1. **Compacte JSON.** De helft van de tekens in een doorgeïndenteerde FitSummary zijn spaties.
+2. **Geen weekreeksen naar de klantsamenvatting** (`weekly`, `baseline_decomposition`). Die
+   samenvatting gaat over het geheel en noemt geen afzonderlijke week; de reeksen nodigen juist uit
+   tot een zin over "week 34" die de lezer niet kan plaatsen. De getallencontrole merkt hier niets
+   van: die krijgt de volledige samenvatting uit de database, niet wat het model te zien kreeg.
+3. **Een cache-breekpunt op de invoer van de uitgebreide analyse.** Die lus pauzeert na tien
+   gereedschapsstappen en hervatten betekent dezelfde aanvraag opnieuw versturen. Zonder breekpunt
+   wordt de grootste invoer van de applicatie bij elke hervatting vol betaald; met breekpunt kost de
+   eerste beurt 1,25× en elke hervatting 0,1×. Vanaf gemiddeld ~1,3 beurten is dat winst.
+
+Deze drie eigenschappen staan vastgelegd in `lib/anthropic/__tests__/requests.test.ts`. Dat is geen
+stijlcontrole: een `JSON.stringify(x, null, 2)` die terugsluipt verdubbelt de rekening zonder dat
+iemand het merkt, en een weggevallen breekpunt is op geen enkele manier zichtbaar in de uitkomst.
+
+### 10.3 Orde van grootte per gebruiker
+
+Eén doorloop, van upload tot gedeelde uitkomst, na de ingrepen hierboven:
+
+* **Minimaal** (geen data-inspectie, geen uitgebreide analyse, een handvol vragen): enkele dubbeltjes.
+* **Volledig** (inspectie, een mislukte en een geslaagde run, klantsamenvatting én uitgebreide
+  analyse met grafieken): ruwweg anderhalve euro op het zwaarste model, ongeveer een derde daarvan
+  op het middenmodel.
+
+Vóór de ingrepen was dat respectievelijk ongeveer het dubbele. Drie dingen zijn hierin schatting en
+geen meting: de tokenaantallen komen uit tekenlengte, het aantal hervattingen in de analyselus is
+op vier gezet (de bovengrens), en of en hoe de sandbox-container apart wordt gefactureerd is niet
+nagetrokken. Wie een harde cijferreeks wil, leest de `usage`-velden van een echte doorloop — die
+staan in de respons en worden nu nergens gelogd.

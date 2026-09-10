@@ -34,7 +34,7 @@ import { STEPS, type StepId } from "@/lib/flow/steps";
 import type { FlowState } from "@/lib/flow/state";
 import { VALIDATION_LEVEL_LABEL, type ProjectSnapshot } from "@/lib/types";
 
-export const GUIDE_MODEL = "claude-sonnet-5";
+export const GUIDE_MODEL = "claude-opus-5";
 
 /**
  * Het model voor de langere schrijfklussen: de klantsamenvatting en de uitgebreide analyse.
@@ -42,7 +42,7 @@ export const GUIDE_MODEL = "claude-sonnet-5";
  * Stond in `lib/anthropic/fitContext.ts`, samen met de contextopbouw voor de verwijderde
  * architect. Losse constante zodat die twee taken onafhankelijk van de gids kunnen verschuiven.
  */
-export const ANALYST_MODEL = "claude-sonnet-5";
+export const ANALYST_MODEL = "claude-opus-5";
 
 /**
  * De stabiele kern van de prompt.
