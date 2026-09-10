@@ -64,7 +64,7 @@ async function handlePost(request: Request) {
   let runQuery = supabase
     .schema("mmm")
     .from("model_results")
-    .select("id, summary")
+    .select("model_run_id, summary")
     .eq("project_id", projectId);
   runQuery = modelRunId
     ? runQuery.eq("model_run_id", modelRunId)
@@ -125,7 +125,7 @@ async function handlePost(request: Request) {
     .schema("mmm")
     .from("model_results")
     .update({ analysis })
-    .eq("id", run.id);
+    .eq("model_run_id", run.model_run_id);
   if (updateErr) {
     return NextResponse.json({ error: updateErr.message }, { status: 400 });
   }
