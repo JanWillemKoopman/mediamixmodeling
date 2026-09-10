@@ -377,6 +377,29 @@ async function handleChangeGoal(ctx: HandlerContext): Promise<HandlerResult> {
 
 type Handler = (ctx: HandlerContext) => Promise<HandlerResult>;
 
+/**
+ * "Verder met dit bestand": de gebruiker bevestigt de bron die er al ligt.
+ *
+ * Dit legde tot nu toe niets vast — het zette alleen een regel in het transcript. Daardoor
+ * had stap 2 geen ander tijdstip dan het moment waarop het bestand ontstond, en bij een
+ * demo-project ligt dat vóór de doelkeuze uit stap 1. Stap 2 was dan permanent achterhaald
+ * door stap 1, en deze knop kon dat niet verhelpen: elke klik schreef opnieuw dezelfde regel
+ * en liet de gebruiker staan waar hij stond. De bevestiging hoort in het grootboek, precies
+ * zoals bij elke andere stap.
+ */
+async function handleContinueWithFile(ctx: HandlerContext): Promise<HandlerResult> {
+  const source = ctx.snapshot.sources[0];
+  if (!source) return { error: "Er is nog geen bestand om mee verder te gaan.", status: 409 };
+  return {
+    decision: {
+      step: "data",
+      data: { source_id: source.id, name: source.name },
+      summary: `Bestand: ${source.name}`,
+    },
+    note: "Verder met dit bestand.",
+  };
+}
+
 const HANDLERS: Record<string, Handler> = {
   "goal.budget": handleGoal,
   "goal.effect": handleGoal,
@@ -388,7 +411,7 @@ const HANDLERS: Record<string, Handler> = {
   "goal.change": handleChangeGoal,
   "data.demo": handleDemo,
   "data.replace": handleReplace,
-  "data.continue": async () => ({ note: "Verder met dit bestand." }),
+  "data.continue": handleContinueWithFile,
   "columns.confirm": handleConfirmColumns,
   "prepare.start": handlePrepare,
   "prepare.retry": handlePrepare,

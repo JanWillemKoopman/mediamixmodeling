@@ -278,6 +278,16 @@ export function FlowShell({
           router.refresh();
           return;
         }
+        // Waar de handeling je bracht. Zonder deze regel is een geslaagde actie die je tóch
+        // niet verder helpt onzichtbaar in het logboek: de server antwoordt 200, er is geen
+        // fout om te melden, en het enige spoor is dat je even later nog eens klikt. Dat is
+        // precies hoe de vastloper bij stap 2 eruitzag.
+        logAction("flow.actie.resultaat", {
+          actie: action.id,
+          stap_ervoor: state.activeStepId,
+          stap_erna: json.active_step ?? null,
+          verschoven: json.active_step != null && json.active_step !== state.activeStepId,
+        }, projectId);
         setPinned(false);
         router.refresh();
       } catch (err) {

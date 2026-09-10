@@ -234,10 +234,18 @@ function runView(spec: WorldSpec): RunView | null {
   return { run, result, validation: validation(spec.level) };
 }
 
+// Wat er in een beslissing moet staan om de stap ook écht af te maken. Een leeg
+// beslissingsobject leek lang goed genoeg, maar stap 1 is pas af als er een kpi_type in
+// staat — met `decision: {}` stond de gebruiker in ELKE gegenereerde wereld nog op stap 1,
+// en toetsten de invarianten dus nergens iets over de zeven stappen daarna.
+const DECISION: Partial<Record<StepId, Record<string, unknown>>> = {
+  goal: { aim: "effect", kpi_type: "orders" },
+};
+
 function ledgerEntry(step: StepId, spec: WorldSpec): StepDecision {
   return {
     step,
-    decision: {},
+    decision: DECISION[step] ?? {},
     summary: `besluit voor ${step}`,
     decided_at: at(spec.redoneStep === step ? REDO_TICK : TICK[step]),
     decided_by: null,

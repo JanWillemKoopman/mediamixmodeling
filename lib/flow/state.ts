@@ -53,10 +53,25 @@ export interface FlowState {
   complete: boolean;
 }
 
-/** Tijdstip waarop een stap werd afgerond — uit het feit, anders uit het grootboek. */
+/**
+ * Tijdstip waarop een stap voor het laatst is afgerond — het feit of het grootboek, wat
+ * later is.
+ *
+ * Dat "wat later is" is geen detail. Het feit zegt wanneer iets is ONTSTAAN (het bestand is
+ * geüpload), het grootboek wanneer de gebruiker het heeft BEVESTIGD. Alleen het feit nemen
+ * gaat mis zodra die twee in de andere volgorde staan: bij een demo-project bestaat het
+ * bestand al vóórdat de gebruiker zijn doel kiest, waarna stap 2 eeuwig achterhaald is door
+ * stap 1 en de gebruiker er niet meer langs komt — hoe vaak hij "Verder met dit bestand" ook
+ * aanklikt. Veroudering vraagt naar het laatste moment waarop de stap klopte, en dat is de
+ * bevestiging.
+ */
 function decidedAt(ctx: FlowContext, id: StepId): string | null {
   const def = STEPS[id];
-  return def.factDecidedAt(ctx) ?? ctx.ledger[id]?.decided_at ?? null;
+  const fact = def.factDecidedAt(ctx);
+  const confirmed = ctx.ledger[id]?.decided_at ?? null;
+  if (!fact) return confirmed;
+  if (!confirmed) return fact;
+  return new Date(confirmed).getTime() > new Date(fact).getTime() ? confirmed : fact;
 }
 
 /**
