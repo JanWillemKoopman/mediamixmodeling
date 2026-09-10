@@ -49,13 +49,21 @@ export function StepCard({
   step: StepState;
   busy: boolean;
   error: string | null;
-  onAction: (action: StepAction) => void;
+  /** De tweede parameter is de getypte tekst bij een handeling die erom vraagt. */
+  onAction: (action: StepAction, text?: string) => void;
 }) {
   const [confirming, setConfirming] = useState<StepAction | null>(null);
+  // De handeling die om vrije tekst vraagt, plus wat er tot nu toe staat.
+  const [typing, setTyping] = useState<StepAction | null>(null);
+  const [text, setText] = useState("");
 
   // Wisselt de stap, dan hoort een openstaande bevestiging niet mee te reizen: hij ging over
-  // iets anders.
-  useEffect(() => setConfirming(null), [step.id, step.status]);
+  // iets anders. Hetzelfde geldt voor een half getypte toelichting.
+  useEffect(() => {
+    setConfirming(null);
+    setTyping(null);
+    setText("");
+  }, [step.id, step.status]);
 
   if (step.status === "waiting" && step.waiting) {
     return (
@@ -118,6 +126,51 @@ export function StepCard({
     );
   }
 
+  // Een handeling die om vrije tekst vraagt, kreeg tot nu toe nergens een tekstvak: klikken
+  // leverde een foutmelding op ("wordt in een volgende fase gebouwd"). Dat is precies het
+  // soort knop dat iets belooft wat niet bestaat — hier is het vak.
+  if (typing) {
+    return (
+      <div className="rounded-xl border border-strong bg-surface-2 p-4">
+        <p className="text-sm font-medium text-fg">{typing.label}</p>
+        <textarea
+          autoFocus
+          rows={3}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Bijvoorbeeld: in week 12 lag onze webshop drie dagen plat, en in mei liep er een winkelactie."
+          className="mt-2 w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-faint outline-none transition focus:border-strong"
+        />
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy || !text.trim()}
+            onClick={() => {
+              const action = typing;
+              const written = text.trim();
+              setTyping(null);
+              setText("");
+              onAction(action, written);
+            }}
+            className="rounded-full bg-accent px-4 py-2 text-sm text-bg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Doorgeven
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTyping(null);
+              setText("");
+            }}
+            className="rounded-full border border-border px-4 py-2 text-sm text-fg-muted transition hover:bg-surface-3"
+          >
+            Laat maar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (step.actions.length === 0) return null;
 
   return (
@@ -133,7 +186,13 @@ export function StepCard({
             key={action.id}
             type="button"
             disabled={busy}
-            onClick={() => (action.confirms ? setConfirming(action) : onAction(action))}
+            onClick={() =>
+              action.needsText
+                ? setTyping(action)
+                : action.confirms
+                  ? setConfirming(action)
+                  : onAction(action)
+            }
             className={
               "rounded-full px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 " +
               (action.tone === "primary"

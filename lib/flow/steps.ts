@@ -74,7 +74,13 @@ export interface StepAction {
   confirmPrompt?: string;
   /** Springt naar een andere stap in plaats van hier iets te doen (terugkoppeling). */
   goTo?: StepId;
-  /** Vraagt om vrije tekst in plaats van een enkele klik (bv. de bedrijfsomschrijving). */
+  /**
+   * Vraagt om vrije tekst in plaats van een enkele klik.
+   *
+   * De kaart zet er een tekstvak bij; zonder tekst gebeurt er niets. Zo'n handeling die ook
+   * `local` is, gaat als vraag naar de gids in plaats van naar de server — de gebruiker
+   * krijgt dan antwoord in plaats van een regel die in het niets verdwijnt.
+   */
   needsText?: boolean;
   /**
    * Wordt volledig in de kaart afgehandeld en gaat niet naar de server: een bestand kiezen,
@@ -272,7 +278,7 @@ export const STEPS: Record<StepId, StepDefinition> = {
       "Gaten, uitschieters en kanalen die te veel op elkaar lijken. Elk punt wordt een " +
       "keuze in gewone taal, niet een instelling.",
     opening:
-      "Nu maak ik je data klaar. Ik kijk naar ontbrekende weken, weken die er echt uitspringen, en kanalen die zo op elkaar lijken dat ze niet los te beoordelen zijn.\n\nWat ik tegenkom leg ik je voor als een gewone vraag — je hoeft geen instellingen te kiezen.",
+      "Nu maak ik je data klaar. Ik kijk naar ontbrekende weken, weken die er echt uitspringen, en kanalen die zo op elkaar lijken dat ze niet los te beoordelen zijn.\n\nWat ik tegenkom leg ik je voor als een gewone vraag — je hoeft geen instellingen te kiezen. Je ziet er steeds bij hoeveel vragen er zijn, om welke weken het gaat en wat er normaal in je data staat, zodat je het zelf kunt nakijken. Weet je wat er in zo'n week speelde, dan kun je dat erbij zetten.",
     dependsOn: ["columns"],
     ledgerOnly: false,
     completableWithoutTyping: true,
@@ -310,7 +316,10 @@ export const STEPS: Record<StepId, StepDefinition> = {
       }
       return [
         { id: "prepare.start", label: "Maak mijn data klaar", tone: "primary", confirms: true, confirmPrompt: "Ik voeg je data samen tot één weektabel en controleer de kwaliteit. Duurt meestal minder dan een minuut." },
-        { id: "prepare.note", label: "Eerst iets doorgeven over bijzondere weken", tone: "secondary", confirms: false, needsText: true },
+        // Niet elke bijzondere week springt eruit in de cijfers: een webshop die drie dagen
+        // plat lag, een winkel die verbouwde. Dit is de plek om dát te vertellen — de tekst
+        // gaat naar de gids, die meedenkt over wat ermee moet.
+        { id: "prepare.note", label: "Iets vertellen over een bijzondere periode", tone: "secondary", confirms: false, needsText: true, local: true },
       ];
     },
   },

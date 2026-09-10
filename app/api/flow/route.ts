@@ -11,7 +11,8 @@ import { approveDatasetVersion, createDatasetVersion } from "@/lib/datasets";
 import { clearStepDecision, loadLedger, recordStepDecision } from "@/lib/flow/ledger";
 import { appendTranscript, hasGuideFor } from "@/lib/flow/transcript";
 import { availableActions, deriveFlowState } from "@/lib/flow/state";
-import { buildRecipe, type FindingChoices } from "@/lib/flow/recipe";
+import { buildRecipe, type FindingChoices, type FindingNotes } from "@/lib/flow/recipe";
+import { analyseProfile, describeChoices } from "@/lib/flow/dataCheck";
 import { buildIntent, channelsOf, type BeliefAnswers } from "@/lib/flow/beliefs";
 import { createConfiguration, startModelRun } from "@/lib/runs";
 import { STEPS, type Ledger, type StepAction, type StepId } from "@/lib/flow/steps";
@@ -207,24 +208,50 @@ async function handleConfirmColumns(ctx: HandlerContext): Promise<HandlerResult>
   };
 }
 
+/**
+ * Stap 4 uitvoeren: van de gemaakte keuzes naar een datasetversie.
+ *
+ * De regel in het gesprek noemt niet alleen hóéveel er is aangepast maar ook wát, met de
+ * toelichting die de gebruiker erbij typte. Dat is de enige plek waar "Black Friday" als
+ * zin overleeft: het recept houdt er een kolomnaam aan over, het transcript de reden — en
+ * de gids leest het transcript, dus een vraag als "waarom staat die week apart?" is daarna
+ * te beantwoorden.
+ */
 async function handlePrepare(ctx: HandlerContext): Promise<HandlerResult> {
   const source = ctx.snapshot.sources[0];
   if (!source) return { error: "Er is nog geen bestand.", status: 409 };
 
   const choices = (ctx.payload.choices as FindingChoices | undefined) ?? {};
-  const { recipe, problem } = buildRecipe(source, source.mapping, choices);
+  const notes = sanitiseNotes(ctx.payload.notes);
+  const { recipe, problem } = buildRecipe(source, source.mapping, choices, notes);
   if (!recipe) return { error: problem ?? "Ik kan hier geen weektabel van maken.", status: 400 };
 
   const result = await createDatasetVersion(createClient(), ctx.projectId, recipe, ctx.userId);
   if (result.error) return { error: result.error, status: result.status };
 
-  const chosen = Object.entries(choices).filter(([, c]) => c !== "keep").length;
+  // Wat er is aangepast wordt hier opnieuw afgeleid uit het profiel — niet overgenomen uit
+  // de payload. Een client die onzin stuurt, krijgt geen onzin in het transcript.
+  const { findings } = analyseProfile(source.profile, source.mapping);
+  const changes = describeChoices(findings, choices, notes);
   return {
     note:
-      chosen === 0
+      changes.length === 0
         ? "Maak mijn data klaar."
-        : `Maak mijn data klaar, met ${chosen} aanpassing${chosen === 1 ? "" : "en"}.`,
+        : `Maak mijn data klaar, met ${changes.length} aanpassing${changes.length === 1 ? "" : "en"}:\n` +
+          changes.map((line) => `- ${line}`).join("\n"),
   };
+}
+
+/** Toelichtingen uit de payload: alleen tekst, ingekort, en zonder lege regels. */
+function sanitiseNotes(raw: unknown): FindingNotes {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const notes: FindingNotes = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== "string") continue;
+    const text = value.trim().slice(0, 120);
+    if (text) notes[key] = text;
+  }
+  return notes;
 }
 
 async function handleApprove(ctx: HandlerContext): Promise<HandlerResult> {

@@ -7,6 +7,11 @@
 //
 // Reuses the pure stats helpers in lib/eda.ts (already used by the client-side EDA step),
 // so there is one implementation of column classification / stats / correlation.
+//
+// Naast de samenvattende cijfers draagt het profiel de reeks zélf mee (`labels` +
+// `ProfileColumnStats.series`) en de precieze plek van elk gat. Dat is wat stap 4 nodig
+// heeft om een bevinding te laten ZIEN: een piek van 28.298 zegt niets zonder de weken
+// eromheen, en "twee weken geen waarde" is pas na te kijken als erbij staat wélke twee.
 
 import {
   classifyColumns,
@@ -14,7 +19,7 @@ import {
   computeCorrelationMatrix,
   type ColumnKind,
 } from "@/lib/eda";
-import type { ProfileColumnStats, SourceProfile } from "@/lib/types";
+import type { ProfileColumnStats, ProfileMissingRun, SourceProfile } from "@/lib/types";
 
 const DATE_NAME_HINT = /date|datum|week|dag|day|periode/i;
 // |z| beyond this flags a week as an outlier worth a possible event dummy. 3.5 keeps it to
@@ -24,6 +29,14 @@ const MAX_OUTLIERS_PER_COLUMN = 6;
 // A channel pair this correlated is effectively one signal — the model can't attribute
 // separately, and the architect should flag it (drop one, or combine).
 const HIGH_CORRELATION = 0.85;
+// Boven dit aantal rijen gaat de volledige reeks niet mee het profiel in. Een MMM-bestand is
+// wekelijks (of dagelijks over een paar jaar) en blijft daar ruim onder; een uitschieter van
+// honderdduizend rijen hoort geen megabyte JSON in elke paginalading te duwen. Zonder reeks
+// werkt alles gewoon door — stap 4 laat dan de grafiekjes weg, niet de vragen.
+const MAX_SERIES_ROWS = 1200;
+// Hoeveel losse gaten er per kolom worden onthouden. Genoeg om te zeggen wélke weken het
+// zijn; niet zoveel dat een kapotte kolom het profiel laat ontploffen.
+const MAX_MISSING_RUNS = 24;
 
 function pickDateColumn(columns: string[], kinds: Record<string, ColumnKind>): string | null {
   const dateCols = columns.filter((c) => kinds[c] === "date");
@@ -31,22 +44,54 @@ function pickDateColumn(columns: string[], kinds: Record<string, ColumnKind>): s
   return dateCols.find((c) => DATE_NAME_HINT.test(c)) ?? dateCols[0];
 }
 
-// The longest run of consecutive empty cells in a column — the gap a fill strategy must
-// bridge. Distinct from the total missing count: 10 scattered gaps and one 10-week hole
-// need different handling, and the architect should see which it is.
-function longestMissingRun(rows: Record<string, unknown>[], col: string): number {
-  let longest = 0;
-  let current = 0;
-  for (const row of rows) {
-    const v = row[col];
-    if (v === null || v === undefined || v === "") {
-      current += 1;
-      if (current > longest) longest = current;
-    } else {
-      current = 0;
-    }
+// Where the empty cells sit, as consecutive runs. The longest run is what a fill strategy
+// must bridge (10 scattered gaps and one 10-week hole need different handling), and the
+// first/last label of each run is what lets the UI say WHICH weeks are missing instead of
+// only how many — the difference between a claim the user can check and one they can't.
+function missingRuns(
+  rows: Record<string, unknown>[],
+  col: string,
+  labels: string[],
+): ProfileMissingRun[] {
+  const runs: ProfileMissingRun[] = [];
+  let start = -1;
+  const close = (end: number) => {
+    if (start < 0) return;
+    runs.push({
+      start,
+      length: end - start,
+      start_label: labels[start] ?? `rij ${start + 1}`,
+      end_label: labels[end - 1] ?? `rij ${end}`,
+    });
+    start = -1;
+  };
+  for (let i = 0; i < rows.length; i++) {
+    const v = rows[i][col];
+    const empty = v === null || v === undefined || v === "";
+    if (empty && start < 0) start = i;
+    if (!empty) close(i);
   }
-  return longest;
+  close(rows.length);
+  // De langste gaten eerst bewaren, daarna weer op volgorde van de reeks zetten: bij een
+  // kolom met veel gaten zijn de lange de interessante, maar lezen doe je ze chronologisch.
+  return runs
+    .sort((a, b) => b.length - a.length)
+    .slice(0, MAX_MISSING_RUNS)
+    .sort((a, b) => a.start - b.start);
+}
+
+function longestMissingRun(runs: ProfileMissingRun[]): number {
+  return runs.reduce((longest, run) => Math.max(longest, run.length), 0);
+}
+
+/** De reeks zoals hij in het bestand staat: één waarde per rij, null waar de cel leeg was. */
+function columnSeries(rows: Record<string, unknown>[], col: string): (number | null)[] {
+  return rows.map((row) => {
+    const raw = row[col];
+    if (raw === null || raw === undefined || raw === "") return null;
+    const num = typeof raw === "number" ? raw : Number(raw);
+    return Number.isFinite(num) ? num : null;
+  });
 }
 
 function findOutliers(
@@ -87,10 +132,18 @@ export function buildSourceProfile(
     if (first != null && last != null) dateRange = [String(first), String(last)];
   }
 
+  // De x-as van elke reeks: het datumlabel van de rij, of anders het rijnummer. Eén keer
+  // opgebouwd en door alle kolommen gedeeld — ze komen tenslotte uit dezelfde rijen.
+  const labels = rows.map((row, i) =>
+    dateCol ? String(row[dateCol] ?? `rij ${i + 1}`) : `rij ${i + 1}`,
+  );
+  const keepSeries = rows.length <= MAX_SERIES_ROWS;
+
   const columnStats: ProfileColumnStats[] = [];
   const numericCols: string[] = [];
   for (const col of columns) {
     const kind = kinds[col];
+    const runs = missingRuns(rows, col, labels);
     if (kind !== "numeric") {
       const nonEmpty = rows.filter((r) => r[col] !== null && r[col] !== undefined && r[col] !== "").length;
       columnStats.push({
@@ -105,8 +158,9 @@ export function buildSourceProfile(
         p25: null,
         p50: null,
         p75: null,
-        longest_missing_run: longestMissingRun(rows, col),
+        longest_missing_run: longestMissingRun(runs),
         outliers: [],
+        missing_runs: runs,
       });
       continue;
     }
@@ -124,8 +178,10 @@ export function buildSourceProfile(
       p25: s?.p25 ?? null,
       p50: s?.median ?? null,
       p75: s?.p75 ?? null,
-      longest_missing_run: longestMissingRun(rows, col),
+      longest_missing_run: longestMissingRun(runs),
       outliers: s ? findOutliers(rows, col, dateCol, s.mean, s.std) : [],
+      missing_runs: runs,
+      ...(keepSeries ? { series: columnSeries(rows, col) } : {}),
     });
   }
 
@@ -150,5 +206,6 @@ export function buildSourceProfile(
     date_range: dateRange,
     columns: columnStats,
     high_correlations: highCorrelations.slice(0, 12),
+    ...(keepSeries ? { labels } : {}),
   };
 }

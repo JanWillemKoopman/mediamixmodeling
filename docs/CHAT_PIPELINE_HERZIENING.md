@@ -227,6 +227,20 @@ bijzondere week / dat is een fout*. Dubbel-op-elkaar-lijkende kanalen, gaten en 
 krijgen elk zo'n beslissing. Daarna één samenvoeging, één kwaliteitsrapport, één goedkeuring.
 *Legt vast:* recept → `dataset_versions` → `approved_at`.
 
+**Een vraag draagt zijn bewijs mee.** De eerste versie stelde de vraag zonder te laten zien waarop
+hij berustte, en dat is voor deze lezer geen vraag: een marketeer kent zijn eigen weken niet uit zijn
+hoofd, dus "2026-11-23 springt eruit: 28.298" is een bewering die hij niet kan wegen. Daarom staat
+bij elke vraag hoeveel vragen er in totaal zijn, het verloop van de hele reeks met de betreffende
+weken gemarkeerd, om welke weken het precies gaat, wat een gewone week is, wat de buurweken deden en
+wat er een jaar eerder in dezelfde periode stond — plus de weektabel eromheen. De reeks komt uit het
+profiel dat bij de upload wordt gemaakt (`lib/dataProfile.ts`); ontbreekt hij, dan vervalt de
+grafiek en blijft de vraag.
+
+**En hij vraagt door.** Kunnen zeggen *dát* er iets speelde zonder te kunnen zeggen *wát*, is de
+helft van een antwoord: de week wordt apart gezet en niemand weet later nog waarom. De toelichting
+wordt de naam van de event-dummy (`black_friday_2026_47`), blijft als tekst bij het recept staan en
+gaat als regel het transcript in — waar de gids hem leest.
+
 ### Stap 5 — Wat weet jij al?
 De belangrijkste stap, en nu de kortste. Twee delen:
 

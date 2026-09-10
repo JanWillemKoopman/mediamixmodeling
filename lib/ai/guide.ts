@@ -30,6 +30,7 @@ import {
   SEASONALITY_QUESTION,
   channelsOf,
 } from "@/lib/flow/beliefs";
+import { analyseProfile } from "@/lib/flow/dataCheck";
 import { STEPS, type StepId } from "@/lib/flow/steps";
 import type { FlowState } from "@/lib/flow/state";
 import { VALIDATION_LEVEL_LABEL, type ProjectSnapshot } from "@/lib/types";
@@ -154,6 +155,21 @@ function factsBlock(snapshot: ProjectSnapshot): string {
       lines.push(
         `Kolommen die bijna identiek meebewegen: ${correlated.map((p) => `${p.a} en ${p.b} (r=${p.r})`).join("; ")}.`,
       );
+    }
+
+    // Precies de vragen die stap 4 op dit moment stelt, mét het bewijsmateriaal dat de
+    // gebruiker eronder ziet. Vraagt hij "wat is er aan de hand met die week?", dan kan de
+    // gids dezelfde weken en getallen noemen als zijn scherm — in plaats van een tweede,
+    // vagere versie van hetzelfde verhaal.
+    const { findings } = analyseProfile(profile, source.mapping);
+    if (findings.length > 0) {
+      lines.push(`Stap 4 legt de gebruiker ${findings.length} vragen voor:`);
+      findings.forEach((finding, i) => {
+        const facts = finding.evidence?.facts ?? [];
+        lines.push(
+          `  ${i + 1}/${findings.length}. ${finding.headline}${facts.length > 0 ? ` — ${facts.join(" ")}` : ""} Keuzes: ${finding.choices.map((c) => `"${c.label}"`).join(", ")}.`,
+        );
+      });
     }
   }
 

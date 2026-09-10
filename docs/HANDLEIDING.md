@@ -64,9 +64,18 @@ samen aan en uit gaan zijn statistisch niet te scheiden, hoe lang je ook rekent.
 Je krijgt dit als opmerkingen te zien, niet als blokkade — behalve wat écht niet kan.
 
 ### Data voorbereiden
-Één open vraag: zijn er bijzondere periodes (een actie, een storing, Black Friday) of
-afgeleide variabelen die mee moeten? Beschrijf ze in gewone taal, of zeg **nee** om met de
-standaard door te gaan. De AI stelt dan een recept voor; jij keurt het goed.
+De app leest je bestand na en legt je elk opvallend punt voor als een vraag: ontbrekende
+weken, een week die er echt uitspringt, twee kolommen die zo op elkaar lijken dat ze niet
+los te beoordelen zijn. Bovenaan staat hoeveel vragen er zijn, en per vraag zie je waarop
+hij berust — het verloop van de hele reeks met de betreffende weken gemarkeerd, om welke
+weken het precies gaat, wat er in een gewone week staat, wat de buurweken deden en wat er
+een jaar eerder in dezelfde periode stond. Onder elke keuze staat wat hij met je data doet.
+
+Markeer je een week als bijzonder, zet er dan bij **wat** er speelde ("Black Friday",
+"storing in de webshop"). Die tekst wordt de naam van de kolom die die week apart zet, en
+blijft in het gesprek staan — anders is over drie maanden niet meer na te gaan waarom die
+week apart is gezet. Speelde er iets dat niet in de cijfers opvalt (een winkel die
+verbouwde), gebruik dan "Iets vertellen over een bijzondere periode"; dat gaat naar de gids.
 
 Daarna wordt de dataset samengesteld en krijg je een kwaliteitsrapport met een oordeel.
 **Alleen een goedgekeurde dataset mag gemodelleerd worden.**

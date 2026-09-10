@@ -77,6 +77,20 @@ export interface SourceFile {
   created_at: string;
 }
 
+/**
+ * Eén aaneengesloten reeks lege cellen in een kolom.
+ *
+ * Het aantal ontbrekende weken zegt de gebruiker weinig; *welke* weken ontbreken kan hij
+ * wél nakijken in zijn eigen bron. Daarom draagt een gat zijn eerste en laatste label mee.
+ */
+export interface ProfileMissingRun {
+  /** Index in `SourceProfile.labels` waar het gat begint. */
+  start: number;
+  length: number;
+  start_label: string;
+  end_label: string;
+}
+
 export interface ProfileColumnStats {
   name: string;
   kind: "date" | "numeric" | "text";
@@ -91,6 +105,17 @@ export interface ProfileColumnStats {
   p75: number | null;
   longest_missing_run: number;
   outliers: { label: string; value: number; z: number }[];
+  /**
+   * De hele reeks, uitgelijnd op `SourceProfile.labels` — null waar de cel leeg was.
+   *
+   * Hiermee kan stap 4 een bevinding laten zíen in plaats van hem alleen te beweren: een
+   * piek is pas te beoordelen naast de weken eromheen. Optioneel: profielen van vóór deze
+   * uitbreiding hebben hem niet, en bij hele lange bestanden wordt hij weggelaten (zie
+   * MAX_SERIES_ROWS in lib/dataProfile.ts). Alles wat ervan afhangt moet dus zonder kunnen.
+   */
+  series?: (number | null)[];
+  /** Waar de gaten precies zitten. Ook aanwezig als `series` is weggelaten. */
+  missing_runs?: ProfileMissingRun[];
 }
 
 export interface SourceProfile {
@@ -99,6 +124,8 @@ export interface SourceProfile {
   date_range: [string, string] | null;
   columns: ProfileColumnStats[];
   high_correlations: { a: string; b: string; r: number }[];
+  /** De x-as bij `ProfileColumnStats.series`: per rij het datumlabel uit het bestand. */
+  labels?: string[];
 }
 
 // --- column semantics ----------------------------------------------------------------
@@ -152,7 +179,16 @@ export interface DatasetRecipe {
       fill?: FillStrategy;
     }[];
   }[];
-  event_dummies?: { name: string; weeks: [number, number][] }[];
+  event_dummies?: {
+    name: string;
+    weeks: [number, number][];
+    /**
+     * Wat de gebruiker over die week vertelde ("Black Friday-actie"). De worker leest dit
+     * veld niet — het staat hier zodat de reden bij de datasetversie bewaard blijft in
+     * plaats van alleen in een kolomnaam te eindigen.
+     */
+    note?: string;
+  }[];
   features?: {
     name: string;
     op: string;

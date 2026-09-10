@@ -28,6 +28,8 @@ export function StepBody({
   onPayloadChange,
   onChanged,
   onGoBack,
+  onAsk,
+  busy,
 }: {
   stepId: StepId;
   projectId: string;
@@ -40,6 +42,15 @@ export function StepBody({
   onChanged: () => void;
   /** Terug naar een eerdere stap — de uitkomstkaart biedt dat aan als het model tekortkomt. */
   onGoBack: (step: StepId) => void;
+  /**
+   * Een vraag aan de gids, gesteld vanuit de kaart zelf.
+   *
+   * Stap 4 gebruikt dit: bij een opvallende week is "wat is hier aan de hand?" precies de
+   * vraag die een gebruiker heeft, en die hoort niet eerst overgetypt te hoeven worden in
+   * het invoerveld onderaan.
+   */
+  onAsk: (question: string) => void;
+  busy: boolean;
 }) {
   const source = snapshot.sources[0] ?? null;
 
@@ -65,6 +76,9 @@ export function StepBody({
         dataset={snapshot.dataset}
         localSignal={localSignal}
         onPayloadChange={onPayloadChange}
+        onAsk={onAsk}
+        onChanged={onChanged}
+        busy={busy}
       />
     );
   }

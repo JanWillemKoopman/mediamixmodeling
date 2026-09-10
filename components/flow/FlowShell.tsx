@@ -201,7 +201,7 @@ export function FlowShell({
   );
 
   const runAction = useCallback(
-    async (action: StepAction) => {
+    async (action: StepAction, text?: string) => {
       setError(null);
       // Elke handeling van de gebruiker komt hier langs — dit is dus de plek waar het
       // logboek leest als een verslag van wat hij deed, en niet als losse fouten.
@@ -221,6 +221,13 @@ export function FlowShell({
       // lib/ai/guide.ts (PRESET_ASK), zodat de formulering op één plek leeft.
       if (action.id === "beliefs.suggest" || action.id === "launch.diagnose" || action.id === "results.explain") {
         void ask({ preset: action.id });
+        return;
+      }
+      // Wat de gebruiker zelf typt bij een handeling die erom vraagt, gaat naar de gids: die
+      // antwoordt en denkt mee. Het alternatief — de regel alleen wegschrijven — levert een
+      // bericht op waar niemand op reageert.
+      if (action.needsText) {
+        if (text?.trim()) void ask({ message: text.trim() });
         return;
       }
       // Twee achtergrondtaken van minuten: de grondige data-inspectie en de uitgebreide
@@ -363,6 +370,8 @@ export function FlowShell({
               proposal={proposal}
               onPayloadChange={setPayload}
               onChanged={() => router.refresh()}
+              onAsk={(question) => void ask({ message: question })}
+              busy={busy}
               onGoBack={(step) => {
                 setViewingStepId(step);
                 setPinned(step !== state.activeStepId);

@@ -9,6 +9,9 @@ import type { ColumnMapping, ColumnRole, DatasetRecipe, FillStrategy, SourceFile
 /** Welke keuze de gebruiker per bevinding heeft gemaakt: bevindings-id → keuze-id. */
 export type FindingChoices = Record<string, string>;
 
+/** Wat de gebruiker bij een keuze heeft getypt: bevindings-id → toelichting. */
+export type FindingNotes = Record<string, string>;
+
 const FILL_STRATEGIES = new Set<string>(["zero", "ffill", "bfill", "interpolate", "mean", "median"]);
 
 /**
@@ -31,6 +34,38 @@ export function isoWeek(date: Date): [number, number] {
   return [isoYear, week];
 }
 
+/**
+ * Van getypte toelichting naar kolomnaam: "Black Friday-actie!" → "black_friday_actie".
+ *
+ * De naam belandt als kolom in de weektabel en straks in het kwaliteitsrapport, dus hij moet
+ * saai zijn: kleine letters, cijfers en liggende streepjes. Levert de tekst niets bruikbaars
+ * op (alleen leestekens, of een andere schriftsoort), dan is de uitkomst leeg en valt de
+ * aanroeper terug op de neutrale naam — nooit een half kapotte kolomnaam.
+ */
+export function slug(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .split("_")
+    .filter(Boolean)
+    .slice(0, 4)
+    .join("_")
+    .slice(0, 40);
+}
+
+/** Dezelfde naam twee keer bestaat niet in een tabel; hier wordt dat opgelost, niet gemeld. */
+function uniqueName(candidate: string, taken: Set<string>): string {
+  if (!taken.has(candidate)) return candidate;
+  for (let i = 2; i < 100; i++) {
+    const next = `${candidate}_${i}`;
+    if (!taken.has(next)) return next;
+  }
+  return `${candidate}_${Date.now()}`;
+}
+
 export interface RecipeResult {
   recipe: DatasetRecipe | null;
   /** Waarom het niet kan, in mensentaal. Null als het wel kan. */
@@ -44,13 +79,16 @@ export interface RecipeResult {
  *  - `gap:<kolom>` met een fill-strategie → `fill` op die control-kolom (alleen controls; de
  *    rekenkern weigert het op een andere rol).
  *  - `outlier:<kolom>:<datum>` met "event" → een event-dummy op de ISO-week van die datum,
- *    zodat die week niet aan marketing wordt toegeschreven.
+ *    zodat die week niet aan marketing wordt toegeschreven. De toelichting die de gebruiker
+ *    erbij typte ("Black Friday") wordt de naam van die kolom én blijft als tekst bij het
+ *    recept staan — anders overleeft de reden nergens.
  *  - `duplicate:<a>:<b>` met "drop_a"/"drop_b" → die kolom gaat niet mee.
  */
 export function buildRecipe(
   source: SourceFile,
   mapping: ColumnMapping | null,
   choices: FindingChoices,
+  notes: FindingNotes = {},
 ): RecipeResult {
   const entries = mapping?.columns ?? [];
   const dateColumn = entries.find((c) => c.role === "date")?.name;
@@ -97,15 +135,20 @@ export function buildRecipe(
   }
 
   // Bijzondere weken: één dummy per gemarkeerde week, samengevoegd zodat twee pieken in
-  // dezelfde week niet twee identieke kolommen opleveren.
-  const eventWeeks = new Map<string, [number, number]>();
+  // dezelfde week niet twee identieke kolommen opleveren. De toelichtingen van zulke
+  // samengevoegde pieken worden allebei bewaard — er is er niet één "de juiste".
+  const eventWeeks = new Map<string, { week: [number, number]; notes: string[] }>();
   for (const [findingId, choice] of Object.entries(choices)) {
     if (choice !== "event" || !findingId.startsWith("outlier:")) continue;
     const label = findingId.split(":").slice(2).join(":");
     const date = new Date(label);
     if (Number.isNaN(date.getTime())) continue;
     const week = isoWeek(date);
-    eventWeeks.set(`${week[0]}-${week[1]}`, week);
+    const key = `${week[0]}-${week[1]}`;
+    const entry = eventWeeks.get(key) ?? { week, notes: [] };
+    const note = notes[findingId]?.trim();
+    if (note) entry.notes.push(note);
+    eventWeeks.set(key, entry);
   }
 
   const recipe: DatasetRecipe = {
@@ -121,10 +164,19 @@ export function buildRecipe(
     ],
   };
   if (eventWeeks.size > 0) {
-    recipe.event_dummies = Array.from(eventWeeks.values()).map((week) => ({
-      name: `bijzondere_week_${week[0]}_${String(week[1]).padStart(2, "0")}`,
-      weeks: [week],
-    }));
+    // De kolomnamen die er al zijn: een event-dummy die er eentje overschrijft, laat
+    // mmm_core.ingestion terecht struikelen (`event_dummy_name_collision`).
+    const taken = new Set<string>(entries.map((e) => e.name));
+    recipe.event_dummies = Array.from(eventWeeks.values()).map(({ week, notes: reasons }) => {
+      const suffix = `${week[0]}_${String(week[1]).padStart(2, "0")}`;
+      const name = uniqueName(`${slug(reasons[0] ?? "") || "bijzondere_week"}_${suffix}`, taken);
+      taken.add(name);
+      return {
+        name,
+        weeks: [week] as [number, number][],
+        ...(reasons.length > 0 ? { note: reasons.join(" / ") } : {}),
+      };
+    });
   }
 
   return { recipe, problem: null };
