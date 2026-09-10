@@ -830,9 +830,17 @@ export function ResultsCharts({
 
   const rowHeight = 32;
   const roasHeight = Math.max(120, roasData.length * rowHeight);
-  // Met marge is break-even geen ROAS 1,0 maar 1/marge (elke euro omzet is maar
-  // deels winst); zonder marge houden we de klassieke omzet-break-even van 1,0 aan.
-  const breakEven = kpiMargin != null && kpiMargin > 0 ? 1 / kpiMargin : 1;
+  // Met marge is break-even geen ROAS 1,0 maar 1/marge (elke euro omzet is maar deels
+  // winst). Zonder marge geldt 1,0 alleen als de KPI in euro's staat: bij een KPI in
+  // aantallen is ROAS stuks-per-euro, en dan zegt "onder de 1,0" niets over rendement.
+  // Daar tekenen we geen break-evenlijn, want een lijn waar iedereen links van ligt leest
+  // als een oordeel dat we niet kunnen onderbouwen.
+  const breakEven =
+    kpiMargin != null && kpiMargin > 0
+      ? 1 / kpiMargin
+      : summary.kpi_type === "revenue"
+        ? 1
+        : null;
 
   const curves = summary.response_curves ?? [];
   const frontier = summary.efficiency_frontier;
@@ -888,7 +896,9 @@ export function ResultsCharts({
           hint={
             kpiMargin != null
               ? `Rechts van de stippellijn verdient een kanaal zichzelf écht terug: bij €${fmt(kpiMargin, 2)} marge per ${marginUnit} ligt break-even bij ROAS ${fmt(1 / kpiMargin, 2)}. Groen = vrijwel zeker winstgevend; grijs = nog niet te zeggen; rood = vrijwel zeker verliesgevend.`
-              : "Rechts van de stippellijn (1,0) levert een kanaal meer op dan het kost. Let op: échte winstgevendheid hangt van je marge af — vul bij stap 3 de gemiddelde marge per verkocht product in voor de eerlijke break-evenlijn. Groen = vrijwel zeker boven break-even; grijs = nog niet te zeggen; rood = vrijwel zeker eronder."
+              : breakEven != null
+                ? "Rechts van de stippellijn (1,0) levert een kanaal meer op dan het kost. Let op: échte winstgevendheid hangt van je marge af — vul bij stap 3 de gemiddelde marge per verkocht product in voor de eerlijke break-evenlijn. Groen = vrijwel zeker boven break-even; grijs = nog niet te zeggen; rood = vrijwel zeker eronder."
+                : `Je KPI staat in aantallen, dus dit is ${summary.kpi} per bestede euro — niet omzet per euro. Waar break-even ligt hangt af van je marge: vul bij stap 3 de gemiddelde marge per ${marginUnit} in, dan tekenen we de lijn en kleuren we de kanalen.`
           }
         >
           <ResponsiveContainer width="100%" height={roasHeight} className="overflow-hidden">
@@ -897,10 +907,23 @@ export function ResultsCharts({
               <XAxis type="number" tick={AXIS} />
               <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
               <Tooltip content={<RoasTooltip />} cursor={{ fill: "rgba(25,36,59,0.05)" }} />
-              <ReferenceLine x={breakEven} stroke="#3F4B63" strokeDasharray="4 4" label={{ value: "break-even", position: "top", fontSize: 10, fill: "#3F4B63" }} />
+              {breakEven != null && (
+                <ReferenceLine x={breakEven} stroke="#3F4B63" strokeDasharray="4 4" label={{ value: "break-even", position: "top", fontSize: 10, fill: "#3F4B63" }} />
+              )}
               <Bar dataKey="p50" radius={[0, 3, 3, 0]} barSize={14}>
                 {roasData.map((d) => (
-                  <Cell key={d.name} fill={d.p3 >= breakEven ? SUCCESS : d.p97 <= breakEven ? DANGER : NEUTRAL} />
+                  <Cell
+                    key={d.name}
+                    fill={
+                      breakEven == null
+                        ? NEUTRAL
+                        : d.p3 >= breakEven
+                          ? SUCCESS
+                          : d.p97 <= breakEven
+                            ? DANGER
+                            : NEUTRAL
+                    }
+                  />
                 ))}
                 <ErrorBar dataKey="errorRange" direction="x" width={3} stroke={INK} strokeOpacity={0.35} />
               </Bar>

@@ -512,3 +512,43 @@ describe("de toelichting bij een bijzondere week", () => {
     expect(slug("één twee")).toBe("een_twee");
   });
 });
+
+describe("weken die de gebruiker zelf aanwijst", () => {
+  it("maakt een event-dummy zonder dat de detectie de week aanbood", () => {
+    // Het MediaMarkt-geval: vier Black Fridays op rij lijken onderling normaal, dus de
+    // uitschieter-detectie biedt ze nooit aan. Zonder deze route verdwijnt de invoer.
+    const { recipe } = buildRecipe(SOURCE, MAPPING, {}, {}, [
+      { date: "2024-11-25", note: "Black Friday" },
+    ]);
+    expect(recipe!.event_dummies).toHaveLength(1);
+    expect(recipe!.event_dummies![0].weeks).toEqual([[2024, 48]]);
+    expect(recipe!.event_dummies![0].note).toBe("Black Friday");
+    expect(recipe!.event_dummies![0].name).toBe("black_friday_2024_48");
+  });
+
+  it("voegt meerdere jaren samen tot losse dummy's", () => {
+    const { recipe } = buildRecipe(SOURCE, MAPPING, {}, {}, [
+      { date: "2023-11-20", note: "Black Friday" },
+      { date: "2024-11-25", note: "Black Friday" },
+      { date: "2025-11-24", note: "Black Friday" },
+    ]);
+    expect(recipe!.event_dummies).toHaveLength(3);
+    expect(new Set(recipe!.event_dummies!.map((d) => d.name)).size).toBe(3);
+  });
+
+  it("levert één dummy op als dezelfde week ook als uitschieter is aangevinkt", () => {
+    const { recipe } = buildRecipe(
+      SOURCE,
+      MAPPING,
+      { "outlier:omzet:2025-11-28": "event" },
+      { "outlier:omzet:2025-11-28": "Black Friday" },
+      [{ date: "2025-11-24", note: "Black Friday" }],
+    );
+    expect(recipe!.event_dummies).toHaveLength(1);
+  });
+
+  it("negeert een onleesbare datum in plaats van te struikelen", () => {
+    const { recipe } = buildRecipe(SOURCE, MAPPING, {}, {}, [{ date: "geen datum" }]);
+    expect(recipe!.event_dummies).toBeUndefined();
+  });
+});

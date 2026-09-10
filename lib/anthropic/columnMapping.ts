@@ -21,6 +21,8 @@ Rollen:
 - "date": de datum-/weekkolom.
 - "kpi": de doelvariabele (omzet, leads, conversies) — meestal precies één per bestand.
 - "spend": marketinguitgaven of -volume per kanaal (ook niet-monetair, zoals e-mailverzendingen).
+  Let op: een kolom die alleen 0 en 1 bevat is GEEN spend maar een campagnevlag — geef die "control",
+  ook als de naam naar een kanaal verwijst (bv. "tv_burst_campagne").
 - "control": overige verklarende variabelen (prijs, weer, voorraad) die geen eigen kanaal-effect krijgen.
 - "ignore": id's, vrije tekst, of kolommen die niet in het model horen.
 

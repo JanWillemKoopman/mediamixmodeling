@@ -188,6 +188,21 @@ def validate_columns(
                         suggested_role=ColumnRole.IGNORE,
                     )
                 )
+            elif set(clean.unique()) <= {0.0, 1.0}:
+                # A 0/1 column is a campaign calendar, not media pressure. Modelled as a
+                # channel it gets a saturation curve over the range [0, 1], a "total spend"
+                # that is really a week count, and a ROAS divided by that count — the
+                # numbers come out enormous and mean nothing.
+                findings.append(
+                    ColumnFinding(
+                        column, "binary_column_as_spend", "blocking",
+                        f"Kolom {column!r} bevat alleen 0 en 1. Dat is een campagnevlag, "
+                        f"geen mediadruk: er valt geen verzadigingscurve of rendement per "
+                        f"euro op te berekenen. Neem 'm mee als controlevariabele, dan "
+                        f"corrigeert het model wél voor de weken dat de campagne liep.",
+                        suggested_role=ColumnRole.CONTROL,
+                    )
+                )
 
         if role is ColumnRole.KPI:
             if clean.nunique() < _MIN_DISTINCT_KPI:

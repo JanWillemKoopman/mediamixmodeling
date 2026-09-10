@@ -128,10 +128,10 @@ def _flag_duplicate_dates(
 ) -> None:
     """Warn when a source has multiple *different* rows for the same date.
 
-    Fully-identical duplicate rows are already flagged separately; different rows on the
-    same date are the classic double-count trap (a total row next to detail rows, or an
-    export that repeats the last day). Aggregation will silently sum them, so the builder
-    must at least be told it happened.
+    Fully-identical duplicate rows have already been dropped; what is left here is rows
+    that share a date but differ somewhere — the classic double-count trap (a total row
+    next to detail rows, or an export that repeats the last day). Those may legitimately
+    sum, so they are kept, but the builder must be told it happened.
     """
     if dates.empty:
         return
@@ -230,9 +230,17 @@ def _prepare_source(
 
     n_dup = int(df.duplicated().sum())
     if n_dup:
+        # A row that repeats another row in *every* column — the date and each declared
+        # measure — is a copy/export artefact, not a second observation. Keeping it would
+        # double that period: aggregation sums the KPI and every spend column, inventing a
+        # week that never happened and handing the model a spike to explain. The odds of a
+        # genuine second reading matching to the last decimal across every column are
+        # negligible, so these are dropped before the week is formed.
+        df = df.drop_duplicates().copy()
         report.add(
-            "duplicate_rows", Severity.WARNING,
-            f"{n_dup} duplicate raw row(s) found and kept (they will aggregate together)",
+            "duplicate_rows_dropped", Severity.WARNING,
+            f"{n_dup} row(s) identical to an earlier row in every column were removed "
+            f"before aggregation — keeping them would have doubled those periods",
             source=spec.name, count=n_dup,
         )
 
@@ -519,6 +527,17 @@ def _flag_degenerate_columns(
                 "all_zero_channel", Severity.WARNING,
                 f"spend column {col!r} is zero for the entire analysis window; the model "
                 f"cannot learn anything about this channel — remove it or check the merge",
+                column=col,
+            )
+
+    for col in spend_cols:
+        series = data[col].dropna()
+        if len(series) > 0 and 1 < series.nunique() and set(series.unique()) <= {0.0, 1.0}:
+            report.add(
+                "binary_column_as_spend", Severity.ERROR,
+                f"spend column {col!r} only ever holds 0 or 1; that is a campaign flag, "
+                f"not media pressure — its 'total spend' is a week count and its ROAS is "
+                f"meaningless. Model it as a control/event instead",
                 column=col,
             )
 

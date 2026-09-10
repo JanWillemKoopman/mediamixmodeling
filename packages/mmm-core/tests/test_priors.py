@@ -483,3 +483,53 @@ def test_short_windows_prefer_the_single_parameter_saturation():
     # through them, absurd marginal-ROAS claims.
     _, _, resolved = _resolve(2, n_weeks=MIN_WEEKS_FOR_SEASONALITY - 10)
     assert all(c.saturation is SaturationType.LOGISTIC for c in resolved.config.channels)
+
+
+# --- flighted channels ----------------------------------------------------------------
+
+
+def _flighted_dataset(on_every: int, n_weeks: int = 156, seed: int = 3):
+    """One always-on channel and one that only runs every `on_every`-th week."""
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2022-01-03", periods=n_weeks, freq="7D", name="week_start")
+    always = np.abs(rng.normal(5_000, 1_200, n_weeks)) + 500
+    burst = np.zeros(n_weeks)
+    burst[::on_every] = np.abs(rng.normal(40_000, 6_000, len(burst[::on_every]))) + 1_000
+    kpi = 100_000.0 + 2.0 * always + 1.5 * burst + rng.normal(0, 2_000, n_weeks)
+    return pd.DataFrame({"rev": kpi, "ch0": always, "ch1": burst}, index=idx)
+
+
+def test_a_flighted_channel_keeps_a_usable_saturation_prior():
+    """The radio case: off in most weeks, so the plain median is 0.
+
+    Centring the half-saturation on that zero pins the curve at the very bottom of its
+    range — the channel reads as fully saturated at any spend, the data cannot move it,
+    and the reported contribution is entirely prior. The prior must be centred on the
+    pressure during a flight instead.
+    """
+    data = _flighted_dataset(on_every=3)
+    stats = measure_dataset(data, "rev", ["ch0", "ch1"])
+    burst = stats.channel("ch1")
+
+    assert burst.median_weekly == 0.0, "fixture must actually be off in most weeks"
+    assert burst.median_scaled > 0.05
+
+    resolved = build_model_config(_intent(2), stats)
+    assert not resolved.has_errors, [i.message for i in resolved.errors]
+    flighted = next(c for c in resolved.config.channels if c.name == "ch1")
+    assert flighted.priors.halfsat_log_center > 1e-3
+    # ln(3)/center: with a zero-ish centre this blew up to ~11_000, which is not a prior.
+    assert flighted.priors.logistic_lam_sigma < 100.0
+
+
+def test_the_saturation_prior_does_not_flip_on_one_extra_off_week():
+    """Tv escaped the bug by 0.7pp of zero-weeks. A prior that hinges on crossing 50%
+    off-weeks is not a prior, it is a coin flip — the two must land in the same place."""
+    just_under = measure_dataset(_flighted_dataset(on_every=2), "rev", ["ch0", "ch1"])
+    just_over = measure_dataset(_flighted_dataset(on_every=3), "rev", ["ch0", "ch1"])
+
+    a = build_model_config(_intent(2), just_under).config.channels
+    b = build_model_config(_intent(2), just_over).config.channels
+    centre_a = next(c for c in a if c.name == "ch1").priors.halfsat_log_center
+    centre_b = next(c for c in b if c.name == "ch1").priors.halfsat_log_center
+    assert centre_a == pytest.approx(centre_b, rel=0.5)

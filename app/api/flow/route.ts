@@ -11,7 +11,12 @@ import { approveDatasetVersion, createDatasetVersion } from "@/lib/datasets";
 import { clearStepDecision, loadLedger, recordStepDecision } from "@/lib/flow/ledger";
 import { appendTranscript, hasGuideFor } from "@/lib/flow/transcript";
 import { availableActions, deriveFlowState } from "@/lib/flow/state";
-import { buildRecipe, type FindingChoices, type FindingNotes } from "@/lib/flow/recipe";
+import {
+  buildRecipe,
+  type DeclaredEvent,
+  type FindingChoices,
+  type FindingNotes,
+} from "@/lib/flow/recipe";
 import { analyseProfile, describeChoices } from "@/lib/flow/dataCheck";
 import { buildIntent, channelsOf, type BeliefAnswers } from "@/lib/flow/beliefs";
 import { createConfiguration, startModelRun } from "@/lib/runs";
@@ -223,7 +228,8 @@ async function handlePrepare(ctx: HandlerContext): Promise<HandlerResult> {
 
   const choices = (ctx.payload.choices as FindingChoices | undefined) ?? {};
   const notes = sanitiseNotes(ctx.payload.notes);
-  const { recipe, problem } = buildRecipe(source, source.mapping, choices, notes);
+  const declaredEvents = sanitiseEventWeeks(ctx.payload.event_weeks);
+  const { recipe, problem } = buildRecipe(source, source.mapping, choices, notes, declaredEvents);
   if (!recipe) return { error: problem ?? "Ik kan hier geen weektabel van maken.", status: 400 };
 
   const result = await createDatasetVersion(createClient(), ctx.projectId, recipe, ctx.userId);
@@ -240,6 +246,31 @@ async function handlePrepare(ctx: HandlerContext): Promise<HandlerResult> {
         : `Maak mijn data klaar, met ${changes.length} aanpassing${changes.length === 1 ? "" : "en"}:\n` +
           changes.map((line) => `- ${line}`).join("\n"),
   };
+}
+
+/**
+ * Zelf aangewezen bijzondere weken uit de payload.
+ *
+ * Alleen echte datums komen erdoor, en er is een bovengrens: dit wordt een 0/1-kolom per
+ * week, en wie er honderd aanwijst modelleert zijn KPI weg in dummy's in plaats van hem te
+ * verklaren. Vier jaar acties is ruim binnen de grens.
+ */
+const MAX_DECLARED_EVENT_WEEKS = 24;
+
+function sanitiseEventWeeks(raw: unknown): DeclaredEvent[] {
+  if (!Array.isArray(raw)) return [];
+  const events: DeclaredEvent[] = [];
+  for (const item of raw) {
+    if (item == null || typeof item !== "object") continue;
+    const { date, note } = item as { date?: unknown; note?: unknown };
+    if (typeof date !== "string" || Number.isNaN(new Date(date).getTime())) continue;
+    events.push({
+      date,
+      ...(typeof note === "string" && note.trim() ? { note: note.trim().slice(0, 120) } : {}),
+    });
+    if (events.length >= MAX_DECLARED_EVENT_WEEKS) break;
+  }
+  return events;
 }
 
 /** Toelichtingen uit de payload: alleen tekst, ingekort, en zonder lege regels. */

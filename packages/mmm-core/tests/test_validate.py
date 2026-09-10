@@ -270,3 +270,56 @@ def test_a_model_level_warning_still_blocks_budget_advice():
     )
     assert v.level is ValidationLevel.STATISTICALLY_VALID
     assert not v.allows(Output.BUDGET_ADVICE)
+
+
+# --- the MediaMarkt run: what the old ruleset waved through ----------------------------
+
+
+def _check(validation, code):
+    return next(c for c in validation.checks if c.code == code)
+
+
+def test_a_placebo_that_outranks_half_the_channels_blocks():
+    """The run that prompted this: placebo at 3.3% passed a 5% ceiling while outscoring
+    six of ten channels. If a channel with no spend beats half the real ones, the ranking
+    those channels are read in is noise — whatever the absolute number says."""
+    shares = [0.0469, 0.0488, 0.0464, 0.0403, 0.0282, 0.0281, 0.0242, 0.0086, 0.0084, 0.0037]
+    validation = validate_run(
+        _diagnostics(), n_samples=4000, placebo_share=0.0333, channel_shares=shares,
+    )
+    check = _check(validation, "placebo_clean")
+    assert not check.passed
+    assert check.severity == "blocking"
+    assert "6 van je 10" in check.message
+
+
+def test_a_genuinely_negligible_placebo_still_passes():
+    shares = [0.0469, 0.0488, 0.0464, 0.0403, 0.0282, 0.0281, 0.0242, 0.0086, 0.0084, 0.0037]
+    validation = validate_run(
+        _diagnostics(), n_samples=4000, placebo_share=0.002, channel_shares=shares,
+    )
+    assert _check(validation, "placebo_clean").passed
+
+
+def test_the_absolute_ceiling_still_applies_without_channel_shares():
+    validation = validate_run(_diagnostics(), n_samples=4000, placebo_share=0.09)
+    assert not _check(validation, "placebo_clean").passed
+
+
+def test_a_wide_inner_band_is_caught_even_when_the_outer_one_looks_fine():
+    """94%→99% sits inside tolerance, so the old single-band check passed a model whose
+    50% band covered 80% of weeks. Intervals that wide make every channel look
+    unmeasurable, and the report then blames the user's data for it."""
+    diagnostics = _diagnostics(
+        interval_coverage_94=0.99, interval_coverage_80=0.975, interval_coverage_50=0.80,
+    )
+    validation = validate_run(diagnostics, n_samples=4000)
+    check = _check(validation, "uncertainty_is_calibrated")
+    assert not check.passed
+    assert "50%-marge" in check.message
+    assert "80%" in check.message
+
+
+def test_well_calibrated_bands_pass():
+    validation = validate_run(_diagnostics(), n_samples=4000)
+    assert _check(validation, "uncertainty_is_calibrated").passed

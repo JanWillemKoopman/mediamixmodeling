@@ -19,7 +19,7 @@
 // bijzonders" kan hij zeggen wát er speelde; anders overleeft de reden nergens.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Info, MessageCircleQuestion } from "lucide-react";
+import { CalendarPlus, ChevronDown, Info, MessageCircleQuestion, X } from "lucide-react";
 import { DatasetPreviewTable } from "@/components/DatasetPreviewTable";
 import { humanizeQualityMessage } from "@/lib/humanizeMessage";
 import { issueInfo } from "@/lib/qualityIssueRegistry";
@@ -27,6 +27,85 @@ import { analyseProfile, formatValue, type DataFinding } from "@/lib/flow/dataCh
 import { backfillProfileSeries, needsSeriesBackfill } from "@/lib/flow/profileBackfill";
 import type { DatasetVersion, QualityIssue, SourceFile } from "@/lib/types";
 import { FindingChart } from "@/components/flow/steps/FindingChart";
+
+/**
+ * Weken die de gebruiker zelf aanwijst als bijzonder.
+ *
+ * De uitschieter-vragen hierboven komen uit de detectie, en die ziet alleen weken die
+ * afwijken van hun buren. Een actie die elk jaar op hetzelfde moment terugkeert valt daar
+ * per definitie buiten: vier Black Fridays op rij zijn onderling normaal. Wie weet dat ze er
+ * waren, moet ze hier kwijt kunnen — anders schrijft het model die pieken toe aan de media
+ * die in diezelfde weken omhoog ging.
+ */
+function EventWeeks({
+  weeks,
+  onChange,
+  busy,
+}: {
+  weeks: { date: string; note: string }[];
+  onChange: (next: { date: string; note: string }[]) => void;
+  busy: boolean;
+}) {
+  const update = (i: number, patch: Partial<{ date: string; note: string }>) =>
+    onChange(weeks.map((w, j) => (j === i ? { ...w, ...patch } : w)));
+
+  return (
+    <div className="rounded-xl border border-border bg-surface-2 p-3.5">
+      <p className="text-sm font-medium text-fg">Weken die je zelf kent</p>
+      <p className="mt-0.5 text-xs text-fg-muted">
+        Acties, storingen of feestdagen die elk jaar terugkomen vallen niet op als uitschieter,
+        want alle jaren lijken op elkaar. Noem ze hier, dan schrijft het model die pieken niet
+        toe aan de media die in diezelfde week omhoog ging.
+      </p>
+
+      {weeks.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {weeks.map((week, i) => (
+            <li key={i} className="flex flex-wrap items-center gap-2">
+              <input
+                id={`event-week-date-${i}`}
+                type="date"
+                value={week.date}
+                disabled={busy}
+                onChange={(e) => update(i, { date: e.target.value })}
+                className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-fg focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-50"
+              />
+              <input
+                id={`event-week-note-${i}`}
+                type="text"
+                value={week.note}
+                disabled={busy}
+                maxLength={120}
+                placeholder="Wat speelde er? (bv. Black Friday)"
+                onChange={(e) => update(i, { note: e.target.value })}
+                className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-50"
+              />
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`Week ${week.date || i + 1} weghalen`}
+                onClick={() => onChange(weeks.filter((_, j) => j !== i))}
+                className="rounded-lg p-1.5 text-fg-faint hover:bg-surface-3 hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <button
+        type="button"
+        disabled={busy || weeks.length >= 24}
+        onClick={() => onChange([...weeks, { date: "", note: "" }])}
+        className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-fg hover:bg-surface-3 focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-50"
+      >
+        <CalendarPlus className="h-3.5 w-3.5" />
+        {weeks.length === 0 ? "Een bijzondere week doorgeven" : "Nog een week"}
+      </button>
+    </div>
+  );
+}
 
 function QualityReport({ dataset }: { dataset: DatasetVersion }) {
   const issues = dataset.suitability?.issues ?? [];
@@ -266,7 +345,13 @@ export function QualityCard({
   source: SourceFile;
   dataset: DatasetVersion | null;
   localSignal: { actionId: string; n: number } | null;
-  onPayloadChange: (payload: { choices: Record<string, string>; notes: Record<string, string> } | null) => void;
+  onPayloadChange: (
+    payload: {
+      choices: Record<string, string>;
+      notes: Record<string, string>;
+      event_weeks: { date: string; note?: string }[];
+    } | null,
+  ) => void;
   /** Een vraag aan de gids, vanuit een concrete bevinding. */
   onAsk?: (question: string) => void;
   /** Het profiel is bijgewerkt; de pagina mag opnieuw laden. */
@@ -281,6 +366,10 @@ export function QualityCard({
     Object.fromEntries(findings.map((f) => [f.id, f.defaultChoice])),
   );
   const [explanations, setExplanations] = useState<Record<string, string>>({});
+  // Weken die de gebruiker zelf aanwijst. Zonder dit kan een week alleen apart worden gezet
+  // als de detectie hem toevallig aanbood — en juist een actie die elk jaar terugkeert valt
+  // niet op, omdat alle jaren op elkaar lijken.
+  const [eventWeeks, setEventWeeks] = useState<{ date: string; note: string }[]>([]);
   // "Ik wil iets aanpassen" bij een gebouwde dataset brengt de keuzes terug in beeld. Er
   // wordt niets weggegooid: opnieuw indienen maakt gewoon een nieuwe datasetversie.
   const [editing, setEditing] = useState(false);
@@ -289,8 +378,14 @@ export function QualityCard({
   }, [localSignal]);
 
   useEffect(() => {
-    onPayloadChange({ choices, notes: explanations });
-  }, [choices, explanations, onPayloadChange]);
+    onPayloadChange({
+      choices,
+      notes: explanations,
+      event_weeks: eventWeeks
+        .filter((w) => w.date)
+        .map((w) => ({ date: w.date, ...(w.note.trim() ? { note: w.note.trim() } : {}) })),
+    });
+  }, [choices, explanations, eventWeeks, onPayloadChange]);
 
   // Bestanden van vóór de uitbreiding van het profiel dragen de reeks niet. Die wordt hier
   // eenmalig opgehaald uit het bestand zelf, zodat ook een bestaand project de weken te zien
@@ -347,6 +442,8 @@ export function QualityCard({
               ))}
             </ul>
           )}
+
+          <EventWeeks weeks={eventWeeks} onChange={setEventWeeks} busy={busy} />
 
           {findings.length === 0 ? (
             <p className="text-sm text-fg-muted">

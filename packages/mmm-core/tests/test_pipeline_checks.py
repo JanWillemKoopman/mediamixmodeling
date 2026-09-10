@@ -126,14 +126,17 @@ def test_different_rows_on_same_date_are_flagged():
     assert issue.details["example_date"] == "2022-01-24"
 
 
-def test_identical_duplicate_rows_do_not_trigger_duplicate_dates():
-    # Fully identical rows are covered by the existing duplicate_rows warning.
+def test_identical_duplicate_rows_are_dropped_not_summed():
+    # A row identical in every column is a copy artefact: dropping it keeps the week at
+    # its real value instead of doubling it.
     dates = list(_weekly_dates("2022-01-03", 10))
     df = pd.DataFrame({"date": dates + [dates[3]], "spend": [10.0] * 10 + [10.0]})
     result = build_master_dataset([(_spec("g", "spend", Role.SPEND, "date"), df)])
 
-    assert "duplicate_rows" in result.report.codes()
+    assert "duplicate_rows_dropped" in result.report.codes()
     assert "duplicate_dates_aggregated" not in result.report.codes()
+    assert result.data["spend"].loc[pd.Timestamp(dates[3])] == 10.0
+    assert (result.data["spend"] == 10.0).all()
 
 
 def test_daily_data_does_not_trigger_duplicate_dates():

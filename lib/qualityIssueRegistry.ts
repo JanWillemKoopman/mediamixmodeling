@@ -23,6 +23,11 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
       "Negatieve uitgaven (refunds, correcties) bestaan boekhoudkundig, maar het model interpreteert spend als mediadruk — negatieve druk bestaat niet en verstoort de adstock-schatting.",
     action: "Beschrijf dit aan de architect — die stelt een passende opschoonstap voor.",
   },
+  binary_column_as_spend: {
+    explain:
+      "Deze kolom bevat alleen 0 en 1 — een campagnekalender, geen mediadruk. Als kanaal krijgt hij een verzadigingscurve over het bereik 0–1, een 'totale spend' die eigenlijk een weekteller is, en een rendement dat daardoor nergens op slaat.",
+    action: "Neem 'm mee als controlevariabele, dan corrigeert het model wél voor de weken dat de campagne liep.",
+  },
   all_zero_channel: {
     explain:
       "Een kanaal dat de hele periode € 0 uitgaf levert geen informatie, maar kost wél modelparameters en vertroebelt de budgetoptimalisatie.",
@@ -93,9 +98,10 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
       "De essentiële bestanden delen geen enkele week — er is letterlijk geen periode waarin KPI én spend allebei bestaan.",
     action: "Controleer de datumkolommen (formaat!) en de periodes van de bestanden.",
   },
-  duplicate_rows: {
-    explain: "Volledig identieke rijen worden opgeteld bij het samenvoegen — meestal een dubbele export.",
-    action: "Klopt dit niet, laat de AI dan een dedupe-opschoonstap toevoegen.",
+  duplicate_rows_dropped: {
+    explain:
+      "Rijen die in élke kolom identiek waren aan een eerdere rij zijn verwijderd. Zou dat niet gebeuren, dan telde die week dubbel: zowel de KPI als alle spend.",
+    action: "Hoorden die rijen er wél los te staan (bv. losse transacties)? Zeg het, dan houden we ze apart.",
   },
   unparseable_dates: {
     explain: "Rijen met een onleesbare datum zijn overgeslagen — bij veel rijen wijst dit op een afwijkend datumformaat.",
