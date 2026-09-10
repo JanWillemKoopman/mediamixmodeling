@@ -38,6 +38,7 @@ tightening the bar later never silently re-scores a run that was already publish
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -46,7 +47,9 @@ import math
 from mmm_core.model.identify import IdentifiabilityReport, NOT_IDENTIFIED, WEAK
 
 # Bumped whenever a threshold or rule below changes. Stored alongside every verdict.
-RULESET_VERSION = "2024.2"
+# 2024.3: the placebo is judged against the model's own channel effects as well as the
+# absolute ceiling, and all three coverage bands are checked instead of only the 94% one.
+RULESET_VERSION = "2024.3"
 
 
 class ValidationLevel(str, Enum):
@@ -136,7 +139,9 @@ RESIDUAL_AUTOCORRELATION_WARN = 0.4   # structure the model is still missing
 
 # Generalisation
 HOLDOUT_MAPE_WARN = 0.30
-PLACEBO_SHARE_BLOCKING = 0.05   # a random channel must get ~nothing
+PLACEBO_SHARE_BLOCKING = 0.05   # a random channel must get ~nothing, in absolute terms
+# ...and must also stay below the middle real channel: a placebo that outscores half the
+# channels makes the ranking meaningless however small it looks on its own.
 
 
 @dataclass(frozen=True)
@@ -220,6 +225,12 @@ def _finite(x: float | None) -> bool:
     return x is not None and math.isfinite(x)
 
 
+def _median(values: list[float]) -> float:
+    """Median of an already-sorted, non-empty list."""
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
+
+
 def validate_run(
     diagnostics,
     *,
@@ -227,6 +238,7 @@ def validate_run(
     identifiability: IdentifiabilityReport | None = None,
     holdout_mape: float | None = None,
     placebo_share: float | None = None,
+    channel_shares: Sequence[float] | None = None,
 ) -> ModelValidation:
     """Judge a completed fit.
 
@@ -239,6 +251,9 @@ def validate_run(
             on an unanswered question is not something to hand a user.
         holdout_mape: out-of-sample error from a held-back window, if measured.
         placebo_share: contribution share attributed to a deliberately random channel.
+        channel_shares: each real channel's contribution share, used to judge the placebo
+            against the effect sizes this model actually reports rather than against a
+            fixed percentage that cannot know how big a real channel is here.
     """
     d = diagnostics
     checks: list[ValidationCheck] = []
@@ -323,12 +338,30 @@ def validate_run(
                    d.r2)
         )
 
-    coverage_ok = abs(d.interval_coverage_94 - 0.94) <= COVERAGE_TOLERANCE
+    # All three bands, not just the outermost. A 94% band is wide enough to cover almost
+    # anything, so on its own it passes models whose uncertainty is badly scaled: the run
+    # that prompted this had 94%→99% (inside tolerance) while its 50% band covered 80% of
+    # weeks. Intervals that wide make every channel look unmeasurable, and the report then
+    # blames the user's data for a spread the model invented.
+    bands = [
+        (0.50, d.interval_coverage_50),
+        (0.80, d.interval_coverage_80),
+        (0.94, d.interval_coverage_94),
+    ]
+    off = [
+        (nominal, actual)
+        for nominal, actual in bands
+        if _finite(actual) and abs(actual - nominal) > COVERAGE_TOLERANCE
+    ]
+    worst = max(off, key=lambda b: abs(b[1] - b[0]), default=None)
     checks.append(
-        _check("uncertainty_is_calibrated", coverage_ok, "warning",
-               f"De onzekerheidsmarges kloppen niet goed: ze dekken {d.interval_coverage_94:.0%} "
-               f"van de werkelijke weken in plaats van 94%. De marges zelf zijn dan niet te "
-               f"vertrouwen.",
+        _check("uncertainty_is_calibrated", not off, "warning",
+               f"De onzekerheidsmarges kloppen niet goed: de {worst[0]:.0%}-marge dekt "
+               f"{worst[1]:.0%} van de werkelijke weken in plaats van {worst[0]:.0%}"
+               + (f" ({len(off)} van de 3 marges wijken af)" if len(off) > 1 else "")
+               + ". De marges zelf zijn dan niet te vertrouwen."
+               if worst is not None else
+               "De onzekerheidsmarges kloppen niet goed.",
                d.interval_coverage_94)
     )
 
@@ -359,11 +392,32 @@ def validate_run(
                    holdout_mape)
         )
     if placebo_share is not None and math.isfinite(placebo_share):
+        placebo = abs(placebo_share)
+        # Two ways to fail, and the second is the one that matters.
+        #
+        # The absolute ceiling catches a model that hands out effect wholesale. But a
+        # placebo can sit well under it and still be damning: if a channel with no spend
+        # at all outscores half the real ones, the ranking those channels are read in is
+        # noise, whatever the absolute number is. A fixed 5% cannot see that — it passed a
+        # 3.3% placebo that outranked six of ten channels. So the threshold is also read
+        # against the effects this very model reports.
+        real = sorted(s for s in (channel_shares or ()) if math.isfinite(s))
+        typical = _median(real) if real else None
+        outranked = sum(1 for s in real if abs(s) < placebo)
+        ok = placebo <= PLACEBO_SHARE_BLOCKING and (typical is None or placebo < abs(typical))
+        detail = (
+            f"Een verzonnen kanaal zonder enige echte uitgave krijgt {placebo_share:.1%} van "
+            f"de KPI toegewezen"
+        )
+        if typical is not None and placebo >= abs(typical):
+            detail += (
+                f" — meer dan {outranked} van je {len(real)} kanalen zelf krijgen "
+                f"(middelste kanaal: {abs(typical):.1%})"
+            )
         checks.append(
-            _check("placebo_clean", abs(placebo_share) <= PLACEBO_SHARE_BLOCKING, "blocking",
-                   f"Een verzonnen kanaal zonder enige echte uitgave krijgt "
-                   f"{placebo_share:.1%} van de KPI toegewezen. Het model kent effect toe aan "
-                   f"toeval, dus de echte kanaalcijfers zijn niet te vertrouwen.",
+            _check("placebo_clean", ok, "blocking",
+                   f"{detail}. Het model kent effect toe aan toeval, dus de echte "
+                   f"kanaalcijfers zijn niet te vertrouwen.",
                    placebo_share)
         )
 

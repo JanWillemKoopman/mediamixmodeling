@@ -70,6 +70,7 @@ class ChannelStatistics:
     name: str
     max_weekly: float
     median_weekly: float
+    active_median_weekly: float
     mean_weekly: float
     std_weekly: float
     total: float
@@ -78,7 +79,22 @@ class ChannelStatistics:
 
     @property
     def median_scaled(self) -> float:
-        return self.median_weekly / self.max_weekly if self.max_weekly > 0 else 0.0
+        """Typical weekly pressure on the 0-1 axis, measured over the weeks it ran.
+
+        Deliberately the *active* median, not the median over every week. A flighted
+        channel — tv in bursts, radio in campaigns — is off more often than it is on, so
+        its plain median is 0 and every prior derived from it collapses: the
+        half-saturation point lands at zero, which says the channel is fully saturated at
+        any spend at all. The curve goes flat, the data can no longer move it, and the
+        channel comes out unidentifiable with a contribution that is pure prior.
+
+        The pressure a saturation curve has to be centred on is the pressure during a
+        flight. A channel that is off half the year still saturates at its on-air level.
+        """
+        if self.max_weekly <= 0:
+            return 0.0
+        typical = self.active_median_weekly if self.n_active_weeks > 0 else self.median_weekly
+        return typical / self.max_weekly
 
     @property
     def cv(self) -> float:
@@ -238,6 +254,7 @@ def measure_dataset(
                 name=name,
                 max_weekly=float(raw.max()),
                 median_weekly=float(np.median(raw)),
+                active_median_weekly=float(np.median(raw[active])) if active.any() else 0.0,
                 mean_weekly=float(raw.mean()),
                 std_weekly=float(raw.std()),
                 total=float(raw.sum()),

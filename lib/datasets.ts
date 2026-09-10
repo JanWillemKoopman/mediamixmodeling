@@ -7,7 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MAX_CONCURRENT_DATASET_BUILDS, hasDatasetCapacity, nudgeWorker } from "@/lib/jobs";
-import type { DatasetRecipe } from "@/lib/types";
+import type { ChannelUnit, DatasetRecipe } from "@/lib/types";
 
 export interface DatasetCreateResult {
   datasetVersionId: string | null;
@@ -30,6 +30,13 @@ export async function createDatasetVersion(
   projectId: string,
   recipe: DatasetRecipe,
   userId: string,
+  /**
+   * Waarin elk kanaal meet. Wordt bij de versie bewaard omdat de rest van de app erop
+   * afgaat: alleen een kanaal in euro's krijgt een rendement per euro en doet mee in de
+   * budgetverdeling. Bleef dit leeg, dan viel élk kanaal terug op "currency" — en dan telt
+   * een kolom met e-mailverzendingen mee als bedrag en krijgt hij een ROAS.
+   */
+  columnUnits?: Record<string, ChannelUnit> | null,
 ): Promise<DatasetCreateResult> {
   const fail = (error: string, status: number): DatasetCreateResult => ({
     datasetVersionId: null,
@@ -79,6 +86,7 @@ export async function createDatasetVersion(
       recipe,
       status: "queued",
       created_by: userId,
+      ...(columnUnits && Object.keys(columnUnits).length > 0 ? { column_units: columnUnits } : {}),
     })
     .select("id, version_no")
     .single();

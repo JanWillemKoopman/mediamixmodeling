@@ -128,10 +128,10 @@ def _flag_duplicate_dates(
 ) -> None:
     """Warn when a source has multiple *different* rows for the same date.
 
-    Fully-identical duplicate rows are already flagged separately; different rows on the
-    same date are the classic double-count trap (a total row next to detail rows, or an
-    export that repeats the last day). Aggregation will silently sum them, so the builder
-    must at least be told it happened.
+    Fully-identical duplicate rows have already been dropped; what is left here is rows
+    that share a date but differ somewhere — the classic double-count trap (a total row
+    next to detail rows, or an export that repeats the last day). Those may legitimately
+    sum, so they are kept, but the builder must be told it happened.
     """
     if dates.empty:
         return
@@ -215,6 +215,57 @@ def _flag_coarse_cadence(spec: SourceSpec, dates: pd.Series, report: QualityRepo
     )
 
 
+def _median_day_gap(dates: pd.Series) -> float | None:
+    """Median days between consecutive unique dates, or None if too few to tell."""
+    unique_days = pd.Series(pd.to_datetime(dates)).dt.normalize().drop_duplicates().sort_values()
+    if len(unique_days) < 3:
+        return None
+    return float(unique_days.diff().dropna().dt.days.median())
+
+
+def _drop_identical_rows(
+    spec: SourceSpec, df: pd.DataFrame, parsed: pd.Series, report: QualityReport
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Remove rows that repeat another row in every column — but only where that is safe.
+
+    At weekly or coarser cadence a source holds one row per period, so a row identical in
+    the date and every measure is an export artefact. Keeping it doubles that period: the
+    KPI and every spend column are summed, inventing a week that never happened and handing
+    the model a spike to explain.
+
+    Below weekly it is not that simple. A daily export can legitimately carry two rows with
+    the same date and the same amount — two bookings, two line items, two stores — and
+    summing them is exactly right. There the duplicates are kept and only reported, because
+    dropping real money is worse than reporting a suspicion.
+    """
+    duplicated = df.duplicated()
+    n_dup = int(duplicated.sum())
+    if not n_dup:
+        return df, parsed
+
+    gap = _median_day_gap(parsed)
+    if gap is not None and gap < 5:
+        report.add(
+            "duplicate_rows", Severity.WARNING,
+            f"{n_dup} row(s) identical to an earlier row in every column were kept: this "
+            f"source has a sub-weekly cadence (median {gap:.0f} day(s) between dates), where "
+            f"repeated rows can be genuine separate entries that should sum. Check for a "
+            f"double export",
+            source=spec.name, count=n_dup, median_gap_days=gap,
+        )
+        return df, parsed
+
+    keep = ~duplicated
+    report.add(
+        "duplicate_rows_dropped", Severity.WARNING,
+        f"{n_dup} row(s) identical to an earlier row in every column were removed before "
+        f"aggregation — at this source's cadence one row is one period, so keeping them "
+        f"would have doubled those periods",
+        source=spec.name, count=n_dup,
+    )
+    return df.loc[keep].copy(), parsed.loc[keep]
+
+
 def _prepare_source(
     spec: SourceSpec, df: pd.DataFrame, report: QualityReport
 ) -> tuple[pd.DataFrame, dict[str, Role], dict[str, str]]:
@@ -228,14 +279,6 @@ def _prepare_source(
             f"auto-detected date column {date_col!r}", source=spec.name, column=date_col,
         )
 
-    n_dup = int(df.duplicated().sum())
-    if n_dup:
-        report.add(
-            "duplicate_rows", Severity.WARNING,
-            f"{n_dup} duplicate raw row(s) found and kept (they will aggregate together)",
-            source=spec.name, count=n_dup,
-        )
-
     parsed = pd.to_datetime(df[date_col], errors="coerce")
     n_bad = int(parsed.isna().sum())
     if n_bad:
@@ -246,11 +289,16 @@ def _prepare_source(
         )
     keep = parsed.notna()
     df = df.loc[keep].copy()
-    df["_week"] = to_week_start(parsed.loc[keep])
+    parsed = parsed.loc[keep]
 
-    _flag_duplicate_dates(spec, parsed.loc[keep], df.drop(columns=["_week"]), report)
+    # After parsing, because whether an identical row is a copy depends on the cadence.
+    df, parsed = _drop_identical_rows(spec, df, parsed, report)
+
+    df["_week"] = to_week_start(parsed)
+
+    _flag_duplicate_dates(spec, parsed, df.drop(columns=["_week"]), report)
     _flag_partial_edge_weeks(spec, df["_week"], report)
-    _flag_coarse_cadence(spec, parsed.loc[keep], report)
+    _flag_coarse_cadence(spec, parsed, report)
 
     agg: dict[str, str] = {}
     roles: dict[str, Role] = {}
@@ -519,6 +567,17 @@ def _flag_degenerate_columns(
                 "all_zero_channel", Severity.WARNING,
                 f"spend column {col!r} is zero for the entire analysis window; the model "
                 f"cannot learn anything about this channel — remove it or check the merge",
+                column=col,
+            )
+
+    for col in spend_cols:
+        series = data[col].dropna()
+        if len(series) > 0 and 1 < series.nunique() and set(series.unique()) <= {0.0, 1.0}:
+            report.add(
+                "binary_column_as_spend", Severity.ERROR,
+                f"spend column {col!r} only ever holds 0 or 1; that is a campaign flag, "
+                f"not media pressure — its 'total spend' is a week count and its ROAS is "
+                f"meaningless. Model it as a control/event instead",
                 column=col,
             )
 

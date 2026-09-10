@@ -4,7 +4,65 @@
 // dezelfde cijfers en dezelfde woorden gebruiken. Alles hier is deterministisch: het leest
 // uitsluitend getallen die al in de FitSummary staan, geen extra rekengang of AI-aanroep.
 
-import type { FitSummary, Interval, ResponseCurve } from "./types";
+import type { ChannelResult, FitSummary, Interval, ResponseCurve } from "./types";
+
+/**
+ * De media-euro's, en alleen die.
+ *
+ * `total_spend` staat per kanaal in zijn eigen eenheid. Alles bij elkaar optellen levert
+ * een getal op dat er als een bedrag uitziet maar het niet is: bij MediaMarkt was 57% van
+ * de "70.506.754 besteed" e-mailverzendingen, plus 112 eenheden van twee 0/1-vlaggen. De
+ * kop "0,01 per bestede euro" deelde vervolgens door die vervuilde noemer — op echte
+ * euro's was het 0,028.
+ *
+ * Elke plek die een bedrag of een rendement-per-euro toont, telt daarom alleen de
+ * currency-kanalen. Volumekanalen (verzendingen, vertoningen, GRP's, clicks) horen thuis in
+ * hun eigen eenheid, niet in een euro-totaal.
+ */
+export function currencyChannels(summary: FitSummary): ChannelResult[] {
+  return summary.channels.filter((ch) => ch.unit === "currency");
+}
+
+export function totalMediaSpend(summary: FitSummary): number {
+  return currencyChannels(summary).reduce((s, ch) => s + ch.total_spend, 0);
+}
+
+/**
+ * Kanalen waarvoor het model geen apart cijfer kan geven.
+ *
+ * Die worden terecht buiten het budgetadvies gehouden, maar hun getallen stonden onbenoemd
+ * in de waterval, de ROAS-grafiek en kosten-vs-opbrengst — als metingen, tussen de
+ * metingen. Bij MediaMarkt was dat radio: het rapport zei "hier kan ik geen apart cijfer
+ * voor geven" en toonde vervolgens 140.483, een factor 3,4 boven de waarheid.
+ *
+ * Uit het TOTAAL blijven ze wél meetellen. De som over alle kanalen is beter geschat dan
+ * elk deel apart — het model kent de gezamenlijke mediabijdrage, alleen de verdeling niet.
+ * Ze eruit laten zou het totaal juist verslechteren. Het is de per-kanaal-weergave die
+ * moet zeggen wat je niet mag aflezen.
+ */
+export function unreportableChannels(summary: FitSummary): Set<string> {
+  return new Set(
+    (summary.validation?.per_channel ?? []).filter((c) => !c.usable).map((c) => c.name),
+  );
+}
+
+/** Achtervoegsel voor zo'n kanaal in een as-label, met de voetnoot die erbij hoort. */
+export const UNREPORTABLE_MARK = "†";
+
+export function markUnreportable(name: string, unreportable: Set<string>): string {
+  return unreportable.has(name) ? `${name} ${UNREPORTABLE_MARK}` : name;
+}
+
+export function unreportableNote(unreportable: Set<string>): string {
+  if (unreportable.size === 0) return "";
+  const names = [...unreportable].join(", ");
+  return ` ${UNREPORTABLE_MARK} Voor ${names} kan het model geen apart cijfer geven; die balk is een schatting die vrijwel volledig uit de aanname komt. Lees 'm niet als meting — in het totaal telt hij wel mee.`;
+}
+
+/** Kanalen die wél druk hebben maar niet in euro's — apart te noemen, nooit op te tellen. */
+export function volumeChannels(summary: FitSummary): ChannelResult[] {
+  return summary.channels.filter((ch) => ch.unit !== "currency" && ch.total_spend > 0);
+}
 
 // --- Geld-KPI's: de vier/vijf getallen voor de directietafel -------------------------
 
@@ -24,7 +82,7 @@ export interface MoneyKpis {
 }
 
 export function moneyKpis(summary: FitSummary, kpiMargin?: number | null): MoneyKpis {
-  const totalSpend = summary.channels.reduce((s, ch) => s + ch.total_spend, 0);
+  const totalSpend = totalMediaSpend(summary);
   const marketing: Interval = {
     p3: summary.channels.reduce((s, ch) => s + ch.absolute_contribution.p3, 0),
     p50: summary.channels.reduce((s, ch) => s + ch.absolute_contribution.p50, 0),
@@ -199,7 +257,22 @@ export function recommendedActions(summary: FitSummary, kpiMargin?: number | nul
   const actions: RecommendedAction[] = [];
   const curves = summary.response_curves ?? [];
   const alloc = summary.optimal_allocation;
-  const breakEven = kpiMargin != null && kpiMargin > 0 ? 1 / kpiMargin : 1;
+  // Break-even is alleen bekend als de eenheden kloppen.
+  //
+  // Bij een KPI in euro's is ROAS omzet-per-euro, en is 1,0 een echte grens. Bij een KPI in
+  // aantallen is ROAS *stuks* per euro: tv op 0,016 verkopen per euro klinkt rampzalig, maar
+  // bij €658 per flatscreen is dat €10,45 omzet per euro. Terugvallen op 1,0 verklaart dan
+  // élk kanaal verliesgevend — precies wat er gebeurde: acht van de acht "afbouwen", pal
+  // onder het advies om juist géld naar tv te verschuiven.
+  //
+  // Zonder marge is er bij een aantallen-KPI dus geen oordeel te geven. Geen oordeel is beter
+  // dan een fout oordeel met het label "hoog vertrouwen".
+  const breakEven =
+    kpiMargin != null && kpiMargin > 0
+      ? 1 / kpiMargin
+      : summary.kpi_type === "revenue"
+        ? 1
+        : null;
 
   // 1) Herverdeling bij gelijk budget (het krachtigste, gratis advies).
   if (alloc && curves.length > 0) {
@@ -244,7 +317,10 @@ export function recommendedActions(summary: FitSummary, kpiMargin?: number | nul
       const extraSpend = more.total_weekly_budget - base.total_weekly_budget;
       const extraKpi = more.predicted_contribution.p50 - base.predicted_contribution.p50;
       const returnRatio = extraSpend > 0 ? (extraKpi * (kpiMargin ?? 1)) / extraSpend : 0;
-      const worth = kpiMargin != null ? returnRatio > 1 : extraKpi / Math.max(1, extraSpend) > breakEven;
+      const worth =
+        kpiMargin != null
+          ? returnRatio > 1
+          : breakEven != null && extraKpi / Math.max(1, extraSpend) > breakEven;
       actions.push({
         kind: "scale",
         text: worth
@@ -258,10 +334,30 @@ export function recommendedActions(summary: FitSummary, kpiMargin?: number | nul
 
   // 3) Vrijwel zekere verliesgevers afbouwen (ROAS-band volledig onder break-even).
   // Only currency channels: "return per e-mail sent" cannot be compared with a break-even
-  // ROAS, and a channel with no spend has no return at all.
-  const losers = summary.channels.filter(
-    (ch) => ch.unit === "currency" && ch.roas != null && ch.roas.p97 <= breakEven && ch.total_spend > 0,
+  // ROAS, and a channel with no spend has no return at all. Zonder bekende break-even
+  // (aantallen-KPI zonder marge) wordt hier niets beweerd.
+  //
+  // Kanalen waar de herverdeling hierboven juist geld heen schuift blijven eruit. Twee
+  // adviezen die elkaar tegenspreken — "verschuif 82.438 per week naar tv" pal boven
+  // "verlaag tv, verdient zichzelf niet terug", allebei met een vertrouwenslabel — laten de
+  // lezer met niets achter. Wint de optimizer, want die kijkt naar het marginale rendement
+  // op het huidige niveau; de gemiddelde ROAS kijkt naar het verleden.
+  const scalingUp = new Set(
+    Object.entries(alloc?.per_channel ?? {})
+      .filter(([name, advised]) => advised > (curves.find((c) => c.name === name)?.current_weekly_spend ?? 0))
+      .map(([name]) => name),
   );
+  const losers =
+    breakEven == null
+      ? []
+      : summary.channels.filter(
+          (ch) =>
+            ch.unit === "currency" &&
+            ch.roas != null &&
+            ch.roas.p97 <= breakEven &&
+            ch.total_spend > 0 &&
+            !scalingUp.has(ch.name),
+        );
   if (losers.length > 0) {
     const names = losers.map((c) => c.name).join(", ");
     actions.push({
@@ -269,7 +365,7 @@ export function recommendedActions(summary: FitSummary, kpiMargin?: number | nul
       text: `Herzie of verlaag ${names} — ${losers.length > 1 ? "deze kanalen verdienen" : "dit kanaal verdient"} zichzelf vrijwel zeker niet terug.`,
       detail:
         kpiMargin != null
-          ? `De ROAS ligt met grote zekerheid onder de break-even van ${fmtNum(breakEven, 2)} (bij €${fmtNum(kpiMargin, 2)} marge per eenheid).`
+          ? `De ROAS ligt met grote zekerheid onder de break-even van ${fmtNum(1 / kpiMargin, 2)} (bij €${fmtNum(kpiMargin, 2)} marge per eenheid).`
           : "De ROAS ligt met grote zekerheid onder 1,0 — let op: de échte break-even hangt van je marge af.",
       confidence: "hoog",
     });

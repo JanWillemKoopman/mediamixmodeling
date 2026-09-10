@@ -659,6 +659,7 @@ def summarize_fit(
         identifiability=identifiability,
         holdout_mape=holdout_mape,
         placebo_share=placebo_share,
+        channel_shares=[c.contribution_share.p50 for c in channels],
     )
 
     response_curves: list[ResponseCurve] = []

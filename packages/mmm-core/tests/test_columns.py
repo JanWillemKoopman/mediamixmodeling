@@ -179,3 +179,55 @@ def test_every_message_tells_the_user_what_to_do():
     for finding in result.findings:
         assert len(finding.message) > 40
         assert finding.message.rstrip().endswith((".", "!"))
+
+
+# --- campaign flags mistaken for channels ---------------------------------------------
+
+
+def test_a_zero_one_campaign_flag_cannot_become_a_channel():
+    """The MediaMarkt case: `tv_burst_campagne` is a calendar, not a budget. Modelled as
+    spend its 'total spend' is a week count (42) and its ROAS comes out in the hundreds."""
+    flag = np.zeros(N)
+    flag[10:20] = 1.0
+    data = _frame(tv_burst_campagne=flag)
+    result = validate_columns(data, _roles(tv_burst_campagne="spend"))
+
+    assert not result.ok
+    finding = result.for_column("tv_burst_campagne")[0]
+    assert finding.code == "binary_column_as_spend"
+    assert finding.severity == "blocking"
+    assert finding.suggested_role is ColumnRole.CONTROL
+
+
+def test_the_same_flag_is_fine_as_a_control():
+    flag = np.zeros(N)
+    flag[10:20] = 1.0
+    data = _frame(tv_burst_campagne=flag)
+    assert validate_columns(data, _roles(tv_burst_campagne="control")).ok
+
+
+def test_a_real_channel_that_happens_to_rest_at_zero_is_not_called_binary():
+    """Flighted channels sit at 0 for most weeks — that must stay a legitimate channel."""
+    flighted = np.zeros(N)
+    flighted[::4] = 36_000.0
+    data = _frame(radio_spend=flighted)
+    result = validate_columns(data, _roles(radio_spend="spend"))
+    assert not [f for f in result.for_column("radio_spend") if f.code == "binary_column_as_spend"]
+
+
+def test_a_spend_column_whose_name_says_volume_is_flagged():
+    """`email_verzendingen` als euro's behandelen geeft het een rendement per euro en een
+    plek in de budgetverdeling — allebei betekenisloos. Een waarschuwing, geen blokkade:
+    de eenheid wordt elders vastgelegd en de naam is een aanwijzing, geen bewijs."""
+    data = _frame(email_verzendingen=np.abs(np.random.default_rng(1).normal(180_000, 20_000, N)))
+    result = validate_columns(data, _roles(email_verzendingen="spend"))
+    finding = next(f for f in result.for_column("email_verzendingen"))
+    assert finding.code == "spend_column_may_be_volume"
+    assert finding.severity == "warning"
+    # Een waarschuwing mag de bouw niet tegenhouden.
+    assert result.ok
+
+
+def test_a_normal_spend_column_is_not_flagged_as_volume():
+    data = _frame(radio_spend=np.abs(np.random.default_rng(2).normal(20_000, 4_000, N)))
+    assert not validate_columns(data, _roles(radio_spend="spend")).for_column("radio_spend")

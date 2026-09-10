@@ -12,6 +12,22 @@ export type FindingChoices = Record<string, string>;
 /** Wat de gebruiker bij een keuze heeft getypt: bevindings-id → toelichting. */
 export type FindingNotes = Record<string, string>;
 
+/**
+ * Een week die de gebruiker zelf aanwijst als bijzonder, los van de detectie.
+ *
+ * Zonder dit kan een week alleen apart worden gezet als de uitschieter-detectie hem al had
+ * opgemerkt én aangeboden. Dat gaat mis bij precies het geval waar het het meest toe doet:
+ * een actie die elk jaar terugkeert. Vier Black Fridays op rij lijken onderling normaal, dus
+ * de z-score blijft laag en de week verschijnt nooit als keuze — terwijl de gebruiker
+ * dondersgoed weet dat hij er was. Wie de datum noemt, moet hem kwijt kunnen.
+ */
+export interface DeclaredEvent {
+  /** Een datum in die week; de ISO-week eromheen wordt de dummy. */
+  date: string;
+  /** Waarom die week bijzonder was ("Black Friday"). Wordt de kolomnaam. */
+  note?: string;
+}
+
 const FILL_STRATEGIES = new Set<string>(["zero", "ffill", "bfill", "interpolate", "mean", "median"]);
 
 /**
@@ -89,6 +105,7 @@ export function buildRecipe(
   mapping: ColumnMapping | null,
   choices: FindingChoices,
   notes: FindingNotes = {},
+  declaredEvents: DeclaredEvent[] = [],
 ): RecipeResult {
   const entries = mapping?.columns ?? [];
   const dateColumn = entries.find((c) => c.role === "date")?.name;
@@ -138,18 +155,24 @@ export function buildRecipe(
   // dezelfde week niet twee identieke kolommen opleveren. De toelichtingen van zulke
   // samengevoegde pieken worden allebei bewaard — er is er niet één "de juiste".
   const eventWeeks = new Map<string, { week: [number, number]; notes: string[] }>();
-  for (const [findingId, choice] of Object.entries(choices)) {
-    if (choice !== "event" || !findingId.startsWith("outlier:")) continue;
-    const label = findingId.split(":").slice(2).join(":");
+  const markWeek = (label: string, note: string | undefined) => {
     const date = new Date(label);
-    if (Number.isNaN(date.getTime())) continue;
+    if (Number.isNaN(date.getTime())) return;
     const week = isoWeek(date);
     const key = `${week[0]}-${week[1]}`;
     const entry = eventWeeks.get(key) ?? { week, notes: [] };
-    const note = notes[findingId]?.trim();
-    if (note) entry.notes.push(note);
+    const text = note?.trim();
+    if (text && !entry.notes.includes(text)) entry.notes.push(text);
     eventWeeks.set(key, entry);
+  };
+
+  for (const [findingId, choice] of Object.entries(choices)) {
+    if (choice !== "event" || !findingId.startsWith("outlier:")) continue;
+    markWeek(findingId.split(":").slice(2).join(":"), notes[findingId]);
   }
+  // Weken die de gebruiker zelf aanwees. Ze lopen door dezelfde `markWeek`, dus een week die
+  // óók als uitschieter was aangeboden levert één dummy op in plaats van twee.
+  for (const event of declaredEvents) markWeek(event.date, event.note);
 
   const recipe: DatasetRecipe = {
     sources: [

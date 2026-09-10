@@ -33,6 +33,17 @@ _ID_UNIQUENESS = 0.95
 # for the model to explain at all.
 _MIN_DISTINCT_KPI = 5
 
+# Words that name a volume rather than a budget. A spend column called "verzendingen" or
+# "impressies" is media *pressure*, not money, and treating it as euros gives it a rendement
+# per euro and a place in the budget split — both meaningless. The unit is decided elsewhere
+# (the classifier proposes it, the dataset version stores it); this is only the net that
+# catches a column whose own name says what it is.
+_VOLUME_WORDS = (
+    "verzending", "mailing", "sends", "sent", "impressie", "impression", "vertoning",
+    "bereik", "reach", "grp", "trp", "click", "klik", "views", "weergave", "contacts",
+    "opens", "bezoek", "sessies", "sessions",
+)
+
 
 class ColumnRole(str, Enum):
     DATE = "date"
@@ -99,13 +110,21 @@ def _numeric_share(series: pd.Series) -> float:
 
 
 def validate_columns(
-    data: pd.DataFrame, roles: dict[str, str | ColumnRole]
+    data: pd.DataFrame,
+    roles: dict[str, str | ColumnRole],
+    *,
+    include_structural: bool = True,
 ) -> ColumnValidation:
     """Check every assigned role against the column's actual values.
 
     Args:
         data: the uploaded table (raw, before any aggregation).
         roles: ``{column: role}`` as proposed — by the AI, by the user, or by both.
+        include_structural: also check that the set as a whole hangs together (one date,
+            one KPI, at least one channel). Turn this off when validating a single source
+            of a multi-file model: one file legitimately holds only the KPI or only the
+            channels, and the assembled model is where "is there a date column" is a real
+            question.
 
     Returns findings, not an exception: the caller shows all the problems at once rather
     than making the user discover them one upload at a time.
@@ -188,6 +207,31 @@ def validate_columns(
                         suggested_role=ColumnRole.IGNORE,
                     )
                 )
+            elif set(clean.unique()) <= {0.0, 1.0}:
+                # A 0/1 column is a campaign calendar, not media pressure. Modelled as a
+                # channel it gets a saturation curve over the range [0, 1], a "total spend"
+                # that is really a week count, and a ROAS divided by that count — the
+                # numbers come out enormous and mean nothing.
+                findings.append(
+                    ColumnFinding(
+                        column, "binary_column_as_spend", "blocking",
+                        f"Kolom {column!r} bevat alleen 0 en 1. Dat is een campagnevlag, "
+                        f"geen mediadruk: er valt geen verzadigingscurve of rendement per "
+                        f"euro op te berekenen. Neem 'm mee als controlevariabele, dan "
+                        f"corrigeert het model wél voor de weken dat de campagne liep.",
+                        suggested_role=ColumnRole.CONTROL,
+                    )
+                )
+            elif any(w in column.lower() for w in _VOLUME_WORDS):
+                findings.append(
+                    ColumnFinding(
+                        column, "spend_column_may_be_volume", "warning",
+                        f"De naam van kolom {column!r} wijst op een aantal (verzendingen, "
+                        f"vertoningen, kliks), niet op een bedrag. Klopt dat, geef de kolom "
+                        f"dan de juiste eenheid: alleen een kolom in euro's krijgt een "
+                        f"rendement per euro en telt mee in de budgetverdeling.",
+                    )
+                )
 
         if role is ColumnRole.KPI:
             if clean.nunique() < _MIN_DISTINCT_KPI:
@@ -226,7 +270,8 @@ def validate_columns(
                 )
             )
 
-    findings.extend(_structural_findings(data, roles))
+    if include_structural:
+        findings.extend(_structural_findings(data, roles))
     return ColumnValidation(tuple(findings))
 
 
