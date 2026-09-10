@@ -152,14 +152,6 @@ const failedRun = (ctx: FlowContext) => {
 const publishedRun = (ctx: FlowContext) =>
   ctx.snapshot.runs.find((r) => r.result?.is_published) ?? null;
 
-/** Het aantal kanalen in de goedgekeurde dataset — nodig om stap 5 te kunnen tonen. */
-function channelNames(ctx: FlowContext): string[] {
-  const roles = ctx.snapshot.approvedDataset?.column_roles ?? {};
-  return Object.entries(roles)
-    .filter(([, role]) => role === "spend")
-    .map(([name]) => name);
-}
-
 // --- de acht stappen -------------------------------------------------------------------
 
 export const STEPS: Record<StepId, StepDefinition> = {
@@ -341,12 +333,12 @@ export const STEPS: Record<StepId, StepDefinition> = {
     factDecidedAt: (ctx) => ctx.ledger.beliefs?.decided_at ?? null,
     actions: (ctx) => {
       if (ctx.snapshot.approvedDataset == null) return [];
-      const done = ctx.ledger.beliefs != null;
       return [
+        { id: "beliefs.confirm", label: "Hiermee verder", tone: "primary", confirms: false },
         {
-          id: "beliefs.fill",
-          label: done ? "Mijn antwoorden aanpassen" : "Beantwoord de vragen",
-          tone: "primary",
+          id: "beliefs.unknown",
+          label: "Ik weet het nog niet — laat mijn data alles bepalen",
+          tone: "secondary",
           confirms: false,
         },
         {
@@ -355,16 +347,6 @@ export const STEPS: Record<StepId, StepDefinition> = {
           tone: "secondary",
           confirms: false,
         },
-        ...(channelNames(ctx).length === 0
-          ? []
-          : [
-              {
-                id: "beliefs.unknown",
-                label: "Ik weet het nog niet — laat mijn data alles bepalen",
-                tone: "secondary" as const,
-                confirms: false,
-              },
-            ]),
       ];
     },
   },
@@ -407,8 +389,9 @@ export const STEPS: Record<StepId, StepDefinition> = {
       if (completedRun(ctx)) {
         return [{ id: "launch.again", label: "Opnieuw berekenen", tone: "secondary", confirms: true, confirmPrompt: "Er komt een nieuwe berekening bij. Je bestaande resultaat blijft gewoon bestaan." }];
       }
+      // Geen aparte "laat zien wat er berekend wordt"-knop: dat overzicht staat al in de
+      // kaart. Een knop die iets toont wat er al staat, is een stap zonder inhoud.
       return [
-        { id: "launch.review", label: "Laat zien wat er berekend wordt", tone: "primary", confirms: false },
         { id: "launch.start", label: "Start de berekening", tone: "primary", confirms: true, confirmPrompt: "De berekening start. Dit duurt meestal 3 à 5 minuten; je kunt intussen wegklikken." },
       ];
     },

@@ -1,13 +1,16 @@
-// Fase "upload" — het enige geaccepteerde niet-tekst-element in de hele wizard: ruwe
-// CSV/XLSX-bytes kunnen niet als chattekst verstuurd worden. Dit is de bijlage-affordance
-// in de compose-balk (net als een bijlage in Slack/WhatsApp), geen wizard-formulier.
+// Een bronbestand uploaden: naar Storage, en als rij in mmm.source_files met een preview en
+// een volledige-reeks-profiel erbij.
+//
+// Het profiel wordt hier gemaakt en niet later: stap 2 geeft er meteen een oordeel over
+// (lib/flow/dataCheck.ts) en stap 4 leidt er de bevindingen uit af. De kolom-classificatie
+// gaat als losse, niet-blokkerende vervolgtaak mee — mislukt die, dan wijst de gebruiker de
+// rollen in stap 3 gewoon zelf aan.
 
 import Papa from "papaparse";
 import { createClient } from "@/lib/supabase/client";
 import { buildSourceProfile } from "@/lib/dataProfile";
 import { humanizeError } from "@/lib/humanizeMessage";
 import type { SourceProfile } from "@/lib/types";
-import type { TurnEnv, TurnReplyResult } from "@/lib/wizard/turns/types";
 
 const BUCKET = "mmm-raw-data";
 const PREVIEW_LINES = 15;
@@ -68,14 +71,4 @@ export async function uploadSourceFile(projectId: string, files: FileList | File
     }).catch(() => {});
   }
   return { error: null };
-}
-
-export function intro(): string {
-  return "";
-}
-
-// Geen tekstvraag in deze fase (het bestand komt via de bijlage-affordance) — elk getypt
-// bericht mag gewoon naar de architect (bv. een vraag over het exportformaat).
-export async function resolve(_env: TurnEnv, _reply: string): Promise<TurnReplyResult> {
-  return { handled: false };
 }

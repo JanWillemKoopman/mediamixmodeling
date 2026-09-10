@@ -1,6 +1,6 @@
 # Herziening van de chat-pipeline
 
-**Status:** voorstel — wacht op akkoord
+**Status:** in uitvoering — zie §0
 **Scope:** het traject dat de gebruiker in `app/projects/[id]` doorloopt, van CSV tot begrepen
 uitkomst. De statistische kern (`packages/mmm-core/`), de worker (`worker/`) en het
 klantdashboard (`app/dashboard/[projectId]`) blijven inhoudelijk ongemoeid — die zijn net
@@ -18,17 +18,22 @@ opgebouwd.
 | 0 — Fundament | ✅ | `0024_flow_ledger.sql` (toegepast), `lib/flow/steps.ts` + `state.ts` + `ledger.ts`, de invarianten over 1584 toestanden, de route-bestaan-test |
 | 1 — Skelet | ✅ | `/projects/[id]/flow`: stappenbalk, permanent transcript, kaart-raamwerk, `POST /api/flow` |
 | 2 — Data-stappen | ✅ | Stap 1 t/m 4 werkend: doel, aanleveren (met vooraf-oordeel), kolommen (klikbaar), klaarmaken (bevindingen als keuzes) + de doorloop-test op de demo-CSV |
-| 3 — Model-stappen | — | |
+| 3 — Model-stappen | ✅ | Stap 5 (verwachtingen per kanaal, "weet ik niet" overal) en 6 (overzicht vóór de berekening, echte voortgang); de oude wizard verwijderd; de projectenlijst gebruikt nu dezelfde afleiding |
 | 4 — Uitkomst | — | |
 | 5 — AI-laag | — | |
 | 6 — Afronden | — | |
 
-Onderweg gevonden en meteen gerepareerd: `GET /api/model-configurations/[id]` werd aangeroepen
-maar bestond niet, dus "gebruik de afstemming van run N" heeft nooit gewerkt.
+Onderweg gevonden en meteen gerepareerd:
 
-De nieuwe route staat náást de bestaande wizard; die blijft ongewijzigd werken tot fase 3 klaar
-is. Handelingen die nog niet gebouwd zijn, zeggen dat met zoveel woorden in plaats van stil te
-blijven.
+- `GET /api/model-configurations/[id]` werd aangeroepen maar bestond niet, dus "gebruik de
+  afstemming van run N" heeft nooit gewerkt.
+- De projectenlijst bevroeg `mmm.datasets` en `mmm.jobs` — tabellen die migratie 0022 heeft
+  gedropt. De voortgangsregel stond daardoor voor élk project op stap 1, zonder dat iets een
+  fout gaf. Hij gebruikt nu `deriveFlowState`, dezelfde afleiding als het traject zelf.
+
+Wat nog niet gebouwd is, zegt dat met zoveel woorden in plaats van stil te blijven: de
+AI-acties (stap 3 "laat de gids nakijken", stap 5 "vul dit voor me in", stap 6 "laat de gids
+meekijken") landen in fase 5, de uitkomstlagen in fase 4.
 
 ---
 

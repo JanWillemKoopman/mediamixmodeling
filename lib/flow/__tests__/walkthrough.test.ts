@@ -16,6 +16,8 @@ import Papa from "papaparse";
 import { describe, expect, it } from "vitest";
 import { buildSourceProfile } from "@/lib/dataProfile";
 import { analyseProfile, checkSource } from "@/lib/flow/dataCheck";
+import { buildIntent, channelsOf, describeIntent } from "@/lib/flow/beliefs";
+import { validateIntent } from "@/lib/modelIntent";
 import { buildRecipe } from "@/lib/flow/recipe";
 import { activeStep, availableActions, deriveFlowState } from "@/lib/flow/state";
 import { STEPS, type Ledger, type StepId } from "@/lib/flow/steps";
@@ -177,13 +179,39 @@ describe("de hele weg, op het echte demobestand", () => {
       if (column.fill != null) expect(column.role, `${column.name} draagt een fill`).toBe("control");
     }
 
+    // --- stap 5 en 6: verwachtingen en rekenen ----------------------------------------
+    const approvedWorld = buildWorld({
+      goal: true, source: true, columnsConfirmed: true, dataset: "approved",
+      beliefs: false, run: null, level: "statistically_valid", published: false, resultsAcknowledged: false,
+    });
+    const approved = approvedWorld.snapshot.approvedDataset!;
+    // De goedgekeurde data van de wereldgenerator draagt maar één kanaal; voor stap 5 telt dat
+    // de kanalen en eenheden uit de dataset komen en niet uit de kaart.
+    expect(channelsOf(approved).length).toBeGreaterThan(0);
+
+    // Niets aangegeven is een volwaardige afstemming: dat is het "ik weet het nog niet"-pad,
+    // en het moet tot een geldige intentie leiden.
+    const leeg = buildIntent(approved, "revenue", { channels: {} });
+    expect(validateIntent(leeg, approved.column_roles ?? {})).toEqual([]);
+    for (const channel of leeg.channels) expect(channel.carryover).toBe("unknown");
+
+    // Het overzicht van stap 6 vertelt wat er berekend wordt, zonder enig afgeleid getal.
+    const rows = describeIntent(leeg);
+    expect(rows.length).toBeGreaterThan(3);
+    for (const row of rows) expect(row.value, row.label).not.toMatch(/\d+[.,]\d+/);
+
     // --- de rest van de weg blijft begaanbaar -----------------------------------------
-    // Vanaf hier bouwt fase 3 verder; wat telt is dat elke volgende toestand een uitweg heeft.
     const laterStages: { where: string; spec: Parameters<typeof buildWorld>[0] }[] = [
       { where: "data wordt klaargemaakt", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "building", beliefs: false, run: null, level: "statistically_valid", published: false, resultsAcknowledged: false } },
       { where: "klaarmaken mislukt", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "failed", beliefs: false, run: null, level: "statistically_valid", published: false, resultsAcknowledged: false } },
       { where: "kwaliteitsrapport klaar", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "ready", beliefs: false, run: null, level: "statistically_valid", published: false, resultsAcknowledged: false } },
       { where: "data goedgekeurd", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "approved", beliefs: false, run: null, level: "statistically_valid", published: false, resultsAcknowledged: false } },
+      { where: "verwachtingen vastgelegd", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "approved", beliefs: true, run: null, level: "statistically_valid", published: false, resultsAcknowledged: false } },
+      { where: "berekening loopt", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "approved", beliefs: true, run: "running", level: "statistically_valid", published: false, resultsAcknowledged: false } },
+      { where: "berekening mislukt", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "approved", beliefs: true, run: "failed", level: "statistically_valid", published: false, resultsAcknowledged: false } },
+      { where: "uitkomst te zwak om te delen", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "approved", beliefs: true, run: "completed", level: "technically_completed", published: false, resultsAcknowledged: true } },
+      { where: "uitkomst bruikbaar", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "approved", beliefs: true, run: "completed", level: "usable_for_decisions", published: false, resultsAcknowledged: true } },
+      { where: "gedeeld", spec: { goal: true, source: true, columnsConfirmed: true, dataset: "approved", beliefs: true, run: "completed", level: "usable_for_decisions", published: true, resultsAcknowledged: true } },
     ];
     for (const stage of laterStages) {
       const w = buildWorld(stage.spec);

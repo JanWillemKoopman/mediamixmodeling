@@ -41,17 +41,17 @@ Alle vier draaien ook in CI (`.github/workflows/ci.yml`).
 
 | Map | Wat het is |
 |---|---|
-| `app/`, `components/`, `lib/` | Next.js: bouwerswizard + klantdashboard |
+| `app/`, `components/`, `lib/` | Next.js: het bouwerstraject (`lib/flow/`) + klantdashboard |
 | `packages/mmm-core/` | De statistische kern (ingestie, priors, fit, diagnostiek, oordeel). Kent geen database en geen LLM. |
 | `worker/` | De Modal-worker: state machine, claiming, storage, foutclassificatie. Bevat geen statistiek. |
 | `supabase/migrations/` | Schema + RLS |
 | `docs/` | Architectuur, refactorplan, archief |
 
-- `app/projects/[id]` — de chat-gestuurde wizard: links een doorlopend gesprek dat de
-  bouwer stap voor stap door het proces loodst (`lib/wizard/`), rechts een read-only
-  model-dossier met de voortgang en alle vastgelegde kennis. De AI wordt alleen
-  ingeschakeld bij vrij typen of een expliciet voorstel; de standaardflow is verder
-  volledig deterministisch en kost geen tokens.
+- `app/projects/[id]` — het traject van CSV tot begrepen uitkomst, in acht stappen
+  (`lib/flow/`): links de stappenbalk met per stap wat er is besloten, rechts het gesprek en
+  de kaart van de stap waar je staat. De toestand wordt deterministisch afgeleid uit de
+  feiten plus het stappen-grootboek en kost geen tokens; de AI legt alleen uit en doet
+  voorstellen. Zie [`docs/CHAT_PIPELINE_HERZIENING.md`](docs/CHAT_PIPELINE_HERZIENING.md).
 - `app/dashboard/[projectId]` — **klant-weergave**: alleen gepubliceerde resultaten,
   read-only, altijd met zichtbare onzekerheid. Geen chat, geen ruwe data.
 

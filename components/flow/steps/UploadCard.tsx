@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Info, Paperclip } from "lucide-react";
-import { uploadSourceFile } from "@/lib/wizard/turns/upload";
+import { uploadSourceFile } from "@/lib/flow/upload";
 import { checkSource } from "@/lib/flow/dataCheck";
 import type { SourceFile } from "@/lib/types";
 

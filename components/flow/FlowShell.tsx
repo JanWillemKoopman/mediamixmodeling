@@ -21,22 +21,23 @@ import { StepBody } from "@/components/flow/StepBody";
 import type { FlowState } from "@/lib/flow/state";
 import type { StepAction, StepId } from "@/lib/flow/steps";
 import type { TranscriptEntry } from "@/lib/flow/transcript";
-import type { DatasetVersion, SourceFile } from "@/lib/types";
+import type { Ledger } from "@/lib/flow/steps";
+import type { ProjectSnapshot } from "@/lib/types";
 
 export function FlowShell({
   projectId,
   projectName,
   state,
   transcript,
-  source,
-  dataset,
+  snapshot,
+  ledger,
 }: {
   projectId: string;
   projectName: string;
   state: FlowState;
   transcript: TranscriptEntry[];
-  source: SourceFile | null;
-  dataset: DatasetVersion | null;
+  snapshot: ProjectSnapshot;
+  ledger: Ledger;
 }) {
   const router = useRouter();
   const [viewingStepId, setViewingStepId] = useState<StepId>(state.activeStepId);
@@ -191,8 +192,8 @@ export function FlowShell({
             <StepBody
               stepId={viewing.id}
               projectId={projectId}
-              source={source}
-              dataset={dataset}
+              snapshot={snapshot}
+              ledger={ledger}
               localSignal={localSignal}
               onPayloadChange={setPayload}
               onChanged={() => router.refresh()}

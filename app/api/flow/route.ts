@@ -12,8 +12,11 @@ import { clearStepDecision, loadLedger, recordStepDecision } from "@/lib/flow/le
 import { appendTranscript, hasGuideFor } from "@/lib/flow/transcript";
 import { availableActions, deriveFlowState } from "@/lib/flow/state";
 import { buildRecipe, type FindingChoices } from "@/lib/flow/recipe";
-import { STEPS, type StepAction, type StepId } from "@/lib/flow/steps";
-import type { ColumnMapping, ProjectSnapshot, SourceProfile } from "@/lib/types";
+import { buildIntent, channelsOf, type BeliefAnswers } from "@/lib/flow/beliefs";
+import { createConfiguration, startModelRun } from "@/lib/runs";
+import { STEPS, type Ledger, type StepAction, type StepId } from "@/lib/flow/steps";
+import { validateIntent } from "@/lib/modelIntent";
+import type { ColumnMapping, KpiType, ProjectSnapshot, SourceProfile } from "@/lib/types";
 
 /**
  * De enige plek waar het traject vooruit gaat.
@@ -39,6 +42,8 @@ interface HandlerContext {
   projectId: string;
   userId: string;
   snapshot: ProjectSnapshot;
+  /** Wat er in eerdere stappen is besloten — stap 6 leest hier stap 1 en 5 uit. */
+  ledger: Ledger;
   action: StepAction;
   payload: Record<string, unknown>;
 }
@@ -68,7 +73,7 @@ const GOAL_KPI: Record<string, { kpi_type: string; label: string }> = {
 };
 
 async function handleGoal(ctx: HandlerContext): Promise<HandlerResult> {
-  const existing = (await loadLedger(ctx.projectId)).goal?.decision ?? {};
+  const existing = ctx.ledger.goal?.decision ?? {};
 
   const aim = GOAL_AIM[ctx.action.id];
   if (aim) {
@@ -239,6 +244,77 @@ async function handleApprove(ctx: HandlerContext): Promise<HandlerResult> {
   };
 }
 
+/**
+ * Stap 5 vastleggen.
+ *
+ * De antwoorden gaan als antwoorden het grootboek in, niet als afgeleide modelinstellingen.
+ * Dat is bewust: een volgende berekening op nieuwe data moet de intentie opnieuw kunnen
+ * afleiden. Wie de uitkomst van de afleiding bewaart, zet de afstemming vast op de oude data.
+ */
+async function handleBeliefs(ctx: HandlerContext): Promise<HandlerResult> {
+  const dataset = ctx.snapshot.approvedDataset;
+  if (!dataset) return { error: "Keur je data eerst goed.", status: 409 };
+
+  // "Ik weet het nog niet" is een volwaardig antwoord: alles op unknown, en de data bepaalt
+  // alles. Geen stille middenwaarde die de gebruiker nooit heeft gekozen.
+  const answers: BeliefAnswers =
+    ctx.action.id === "beliefs.unknown"
+      ? { channels: {} }
+      : ((ctx.payload.answers as BeliefAnswers | undefined) ?? { channels: {} });
+
+  const kpiType = (ctx.ledger.goal?.decision.kpi_type as KpiType | undefined) ?? "revenue";
+  // Nu al bouwen en laten keuren, zodat een onsamenhangende afstemming hier stukloopt en niet
+  // pas bij het starten van de berekening.
+  const intent = buildIntent(dataset, kpiType, answers);
+  const problems = validateIntent(intent, dataset.column_roles ?? {});
+  if (problems.length > 0) return { error: problems[0], status: 400 };
+
+  const channels = channelsOf(dataset);
+  const answered = channels.filter((c) => {
+    const a = answers.channels[c.name];
+    return a?.carryover != null || a?.strength != null || a?.saturation != null;
+  }).length;
+
+  return {
+    decision: {
+      step: "beliefs",
+      data: { answers: answers as unknown as Record<string, unknown> },
+      summary:
+        answered === 0
+          ? "Geen verwachtingen — de data bepaalt alles"
+          : `Verwachtingen voor ${answered} van ${channels.length} kanalen`,
+    },
+    note: ctx.action.id === "beliefs.unknown" ? ctx.action.label : "Dit is wat ik weet.",
+  };
+}
+
+/** Stap 6: de afstemming vastleggen en de berekening starten. Twee stappen, één bevestiging. */
+async function handleLaunch(ctx: HandlerContext): Promise<HandlerResult> {
+  const dataset = ctx.snapshot.approvedDataset;
+  if (!dataset) return { error: "Keur je data eerst goed.", status: 409 };
+
+  const answers = (ctx.ledger.beliefs?.decision.answers as BeliefAnswers | undefined) ?? null;
+  if (!answers) return { error: "Beantwoord eerst de vragen over je kanalen.", status: 409 };
+
+  const kpiType = (ctx.ledger.goal?.decision.kpi_type as KpiType | undefined) ?? "revenue";
+  const intent = buildIntent(dataset, kpiType, answers);
+
+  const supabase = createClient();
+  const configured = await createConfiguration(supabase, ctx.projectId, dataset.id, intent, ctx.userId);
+  if (configured.error || !configured.configurationId) {
+    return { error: configured.error ?? "De afstemming kon niet worden vastgelegd.", status: configured.status };
+  }
+
+  const started = await startModelRun(supabase, ctx.projectId, configured.configurationId, ctx.userId);
+  if (started.error) return { error: started.error, status: started.status };
+
+  return {
+    note: started.reused
+      ? "Start de berekening. (Deze bestond al — precies dezelfde afstemming op dezelfde data, dus ik toon die.)"
+      : "Start de berekening.",
+  };
+}
+
 async function handleAcceptResults(ctx: HandlerContext): Promise<HandlerResult> {
   return {
     decision: { step: "results", data: { seen: true }, summary: "Uitkomst bekeken" },
@@ -270,6 +346,11 @@ const HANDLERS: Record<string, Handler> = {
   "prepare.retry": handlePrepare,
   "prepare.rebuild": handlePrepare,
   "prepare.approve": handleApprove,
+  "beliefs.confirm": handleBeliefs,
+  "beliefs.unknown": handleBeliefs,
+  "launch.start": handleLaunch,
+  "launch.retry": handleLaunch,
+  "launch.again": handleLaunch,
   "results.accept": handleAcceptResults,
 };
 
@@ -314,7 +395,8 @@ async function handlePost(request: Request) {
   if (!snapshot) {
     return NextResponse.json({ error: "project niet gevonden" }, { status: 404 });
   }
-  const state = deriveFlowState(snapshot, await loadLedger(projectId));
+  const ledger = await loadLedger(projectId);
+  const state = deriveFlowState(snapshot, ledger);
 
   // Zonder actie: alleen de stap openen (aanroep bij het laden van de pagina).
   if (!actionId) {
@@ -359,7 +441,7 @@ async function handlePost(request: Request) {
     );
   }
 
-  const result = await handler({ projectId, userId: viewer.id, snapshot, action, payload });
+  const result = await handler({ projectId, userId: viewer.id, snapshot, ledger, action, payload });
   if (result.error) {
     return NextResponse.json({ error: result.error }, { status: result.status ?? 400 });
   }

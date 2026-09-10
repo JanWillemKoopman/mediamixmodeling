@@ -7,6 +7,7 @@ import { Card, LinkButton, PageHeader, StatusBadge, TopBar } from "@/components/
 import { NoBuilderAccess } from "@/components/NoAccess";
 import { ProjectCreateForm } from "@/components/ProjectCreateForm";
 import { getHandleidingMarkdown } from "@/lib/handleiding";
+import { loadProgress } from "@/lib/flow/overview";
 import type { Project } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -28,75 +29,16 @@ export default async function ProjectsPage() {
     .order("created_at", { ascending: false });
   const projects = (data ?? []) as Project[];
 
-  // Lichtgewicht voortgangsindicatie per project ("Stap 5 van 8 · parameter-tuning"): een paar
-  // kleine batch-queries over alle projecten heen i.p.v. de volledige pipeline-berekening per
-  // project. De nummering volgt exact de 7-staps-wizard (lib/wizard/script.ts PHASE_STEPS),
-  // zodat de lijst en de wizard dezelfde stap tonen.
-  const TOTAL = 7;
-  const ids = projects.map((p) => p.id);
-  const [{ data: srcRows }, { data: dsRows }, { data: jobRows }, { data: runRows }, { data: ctxRows }] = ids.length
-    ? await Promise.all([
-        supabase.schema("mmm").from("source_files").select("project_id, inspection_confirmed_at").in("project_id", ids),
-        supabase
-          .schema("mmm")
-          .from("datasets")
-          .select("project_id, status, tuning_confirmed_at, created_at")
-          .in("project_id", ids)
-          .order("created_at", { ascending: false }),
-        supabase
-          .schema("mmm")
-          .from("jobs")
-          .select("project_id, type, status, created_at")
-          .in("project_id", ids)
-          .in("type", ["fit", "fit_hierarchical"])
-          .order("created_at", { ascending: false }),
-        supabase.schema("mmm").from("model_runs").select("project_id").in("project_id", ids),
-        supabase.schema("mmm").from("project_context").select("project_id, industry, description, notes").in("project_id", ids),
-      ])
-    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
-
-  const inspectionConfirmed = new Set(
-    ((srcRows ?? []) as { project_id: string; inspection_confirmed_at: string | null }[])
-      .filter((r) => r.inspection_confirmed_at)
-      .map((r) => r.project_id),
-  );
-  const hasSources = new Set((srcRows ?? []).map((r) => r.project_id as string));
-  const latestDataset = new Map<string, { status: string; tuning_confirmed_at: string | null }>();
-  for (const r of (dsRows ?? []) as { project_id: string; status: string; tuning_confirmed_at: string | null }[]) {
-    if (!latestDataset.has(r.project_id)) latestDataset.set(r.project_id, { status: r.status, tuning_confirmed_at: r.tuning_confirmed_at });
-  }
-  const latestFitStatus = new Map<string, string>();
-  for (const r of (jobRows ?? []) as { project_id: string; status: string }[]) {
-    if (!latestFitStatus.has(r.project_id)) latestFitStatus.set(r.project_id, r.status);
-  }
-  const hasRuns = new Set((runRows ?? []).map((r) => r.project_id as string));
-  const hasContext = new Set(
-    ((ctxRows ?? []) as { project_id: string; industry: string | null; description: string | null; notes: unknown[] | null }[])
-      .filter((r) => r.industry || r.description || (Array.isArray(r.notes) && r.notes.length > 0))
-      .map((r) => r.project_id),
-  );
-
-  function step(n: number, label: string): string {
-    return `Stap ${n} van ${TOTAL} · ${label}`;
-  }
+  // Voortgang per project. Geen eigen afleiding meer: lib/flow/overview.ts haalt precies de
+  // velden op die deriveFlowState leest en roept diezelfde functie aan, zodat de lijst en het
+  // traject niet iets anders kunnen beweren. De oude versie hier had zijn eigen drempels en
+  // bevroeg na migratie 0022 twee tabellen die niet meer bestonden.
+  const progress = await loadProgress(supabase, projects.map((p) => p.id));
 
   function phaseLabel(p: Project): string {
-    const fit = latestFitStatus.get(p.id);
-    const fitActive = fit === "queued" || fit === "running";
-    if (p.status === "published") return step(7, "gepubliceerd");
-    if (hasRuns.has(p.id)) return fitActive ? step(6, "nieuwe berekening draait") : step(7, "resultaat beoordelen");
-    if (fitActive) return step(6, "berekening draait");
-    if (fit === "failed" || fit === "cancelled") return step(6, "berekening mislukt");
-    const ds = latestDataset.get(p.id);
-    if (ds?.status === "approved") {
-      if (hasContext.has(p.id) || p.kpi_margin != null) return step(5, "model afstemmen");
-      return step(4, "zakelijke context");
-    }
-    if (ds?.status === "prepared") return step(3, "dataset goedkeuren");
-    if (ds?.status === "preparing") return step(3, "samenvoegen loopt");
-    if (ds?.status === "failed") return step(3, "samenvoegen mislukt");
-    if (hasSources.has(p.id)) return inspectionConfirmed.has(p.id) ? step(3, "data voorbereiden") : step(2, "data-inspectie");
-    return step(1, "data uploaden");
+    const step = progress.get(p.id);
+    if (!step) return "Nog niet begonnen";
+    return `Stap ${step.stepNumber} van ${step.totalSteps} · ${step.label.toLowerCase()}`;
   }
 
   return (

@@ -14,7 +14,7 @@ Next.js (Vercel)  ──►  Supabase (Postgres + Storage + Realtime + RLS)  ◄
 
 | Map | Wat het is |
 |---|---|
-| `app/`, `components/`, `lib/` | De Next.js-bouwersapp en het klantdashboard |
+| `app/`, `components/`, `lib/` | De Next.js-bouwersapp (het achtstappentraject in `lib/flow/`) en het klantdashboard |
 | `packages/mmm-core/` | De statistische kern: ingestie, model, fit, diagnostiek, validatie, optimalisatie. Kent Supabase niet en heeft geen netwerk nodig. |
 | `worker/` | De Modal-worker: state machine, claiming, storage, foutclassificatie. Bevat geen statistiek — die leent hij van `mmm-core`. |
 | `supabase/migrations/` | Het schema. `0022_mmm_v2_schema.sql` is de huidige basis. |
@@ -87,7 +87,7 @@ calculating_results → completed | failed | cancelled`
 - **Idempotency key** per run: dezelfde configuratie + dataset tweemaal insturen levert dezelfde
   rij, geen tweede fit.
 - **Lease + heartbeat**: een run waarvan de worker omvalt, valt terug in de wachtrij in plaats van
-  eeuwig "bezig" te blijven. De wizard toont de huidige stap in mensentaal en escaleert zichtbaar
+  eeuwig "bezig" te blijven. Het traject toont de huidige stap in mensentaal en escaleert zichtbaar
   als het te lang duurt.
 - **Fouten hebben een code, een gebruikersboodschap en een technische tekst.** De gebruiker ziet
   nooit een traceback; de bouwer verliest hem nooit.

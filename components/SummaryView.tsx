@@ -2,7 +2,6 @@
 
 import { ResultsCharts } from "@/components/ResultsCharts";
 import { MMM_GLOSSARY, Term } from "@/components/ui";
-import { useWizardChatOptional } from "@/components/WizardChatContext";
 import { VALIDATION_LEVEL_LABEL, allows } from "@/lib/types";
 import {
   CONFIDENCE_LABEL,
@@ -53,13 +52,13 @@ function IntervalCell({ value, render }: { value: Interval; render: (n: number) 
 function Headline({
   summary,
   kpiMargin,
+  builderView,
 }: {
   summary: FitSummary;
   kpiMargin?: number | null;
+  /** Alleen de bouwer kan de marge invullen, dus alleen hij krijgt de tip hieronder. */
+  builderView?: boolean;
 }) {
-  // null op het klant-dashboard — de klant kan de marge niet zelf invullen, dus de tip
-  // hieronder is alleen zinvol (en zichtbaar) voor de bouwer.
-  const chat = useWizardChatOptional();
   const isCountKpi = summary.kpi_type !== "revenue";
   const m = moneyKpis(summary, kpiMargin);
   const roasWord = isCountKpi === false ? "omzet per bestede euro" : `${summary.kpi} per bestede euro`;
@@ -94,7 +93,7 @@ function Headline({
           </>
         )}
       </p>
-      {m.roiPct == null && chat && (
+      {m.roiPct == null && builderView && (
         <p className="mt-1.5 text-xs text-fg-muted">
           Vul de gemiddelde marge per {summary.kpi} in bij de zakelijke context om hier het netto rendement (ROI) in
           euro&apos;s te zien.
@@ -264,14 +263,24 @@ const OVERALL_HEADLINE: Record<TrustLevel, string> = {
   zwak: "Wees voorzichtig met grote besluiten op basis van dit model",
 };
 
-// Vertrouwensoordeel. In de bouwerswizard (chat != null) de volledige twee-laags diagnostiek
-// met terugnavigatie — de bouwer moet weten of hij naar tuning of naar data terug moet. Op
-// het klantdashboard (chat == null) telt vooral "kan ik dit vertrouwen": één helder oordeel,
-// met dezelfde diagnostiek (mét credible intervals — die verdwijnen nergens) toegankelijk
-// achter "Details" voor wie het wil narekenen.
-function TrustBadge({ summary }: { summary: FitSummary }) {
-  const chat = useWizardChatOptional(); // null op het klant-dashboard
-  if (chat) {
+// Vertrouwensoordeel. Voor de bouwer de volledige twee-laags diagnostiek met terugnavigatie
+// — hij moet weten of hij naar zijn verwachtingen of naar zijn data terug moet. Op het
+// klantdashboard telt vooral "kan ik dit vertrouwen": één helder oordeel, met dezelfde
+// diagnostiek (mét onzekerheidsmarges — die verdwijnen nergens) achter "Details" voor wie het
+// wil narekenen.
+//
+// Welke van de twee, komt uit een prop en niet uit een context: zo is deze component bruikbaar
+// waar hij ook gerenderd wordt, zonder te hoeven weten in welke schil hij hangt.
+function TrustBadge({
+  summary,
+  builderView,
+  onGoBack,
+}: {
+  summary: FitSummary;
+  builderView?: boolean;
+  onGoBack?: (step: "beliefs" | "prepare", reason: string) => void;
+}) {
+  if (builderView) {
     const { sampler, fit } = layeredTrustVerdict(summary);
     return (
       <div className="space-y-3">
@@ -280,7 +289,7 @@ function TrustBadge({ summary }: { summary: FitSummary }) {
           verdict={sampler}
           explanation="Is het model wel goed gesampled? R-hat rond 1.0, een hoge effectieve steekproef (ESS) en weinig/geen divergenties betekenen: de MCMC-sampler heeft de posterior betrouwbaar verkend."
           backLabel="Terug naar tuning"
-          onGoBack={() => chat.goToPhase("tuning", "sampler-diagnostiek niet goed genoeg")}
+          onGoBack={() => onGoBack?.("beliefs", "de berekening liep niet stabiel")}
           metrics={
             <>
               <DiagMetric label={<Term definition={MMM_GLOSSARY.rhat}>Max R-hat</Term>} value={fmt(summary.diagnostics.max_r_hat, 2)} />
@@ -294,7 +303,7 @@ function TrustBadge({ summary }: { summary: FitSummary }) {
           verdict={fit}
           explanation="Is de uitkomst inhoudelijk goed? R² en MAPE zeggen hoe goed het model de historie volgt; dekking en de decompositie of de opbouw en onzekerheidsmarges kloppen."
           backLabel="Terug naar data-inspectie/-voorbereiding"
-          onGoBack={() => chat.goToPhase("inspect", "modelfit/plausibiliteit niet goed genoeg")}
+          onGoBack={() => onGoBack?.("prepare", "de uitkomst volgt je cijfers niet goed genoeg")}
           metrics={
             <>
               <DiagMetric label={<Term definition={MMM_GLOSSARY.r2}>R²</Term>} value={fmt(summary.diagnostics.r2, 2)} />
@@ -498,10 +507,16 @@ export function SummaryView({
   summary,
   kpiMargin,
   validation,
+  builderView,
+  onGoBack,
 }: {
   summary: FitSummary;
   validation?: ModelValidation | null;
   kpiMargin?: number | null;
+  /** Waar: de bouwersweergave (volledige diagnostiek, terugnavigatie, margetip). */
+  builderView?: boolean;
+  /** Terug naar een eerdere stap, met de reden. Alleen zinvol in de bouwersweergave. */
+  onGoBack?: (step: "beliefs" | "prepare", reason: string) => void;
   // Telling-KPI (orders/leads) vs. continue KPI (omzet) — bepaalt de marge-woordkeuze
   // in de grafieken ("per verkochte eenheid" vs. "per euro omzet"). Onbekend = neutraal.
 }) {
@@ -509,8 +524,8 @@ export function SummaryView({
     <div className="space-y-6">
       {/* Hero: conclusie → vertrouwen → actie (business vóór statistiek). */}
       <Verdict validation={validation ?? summary.validation ?? null} />
-      <Headline summary={summary} kpiMargin={kpiMargin} />
-      <TrustBadge summary={summary} />
+      <Headline summary={summary} kpiMargin={kpiMargin} builderView={builderView} />
+      <TrustBadge summary={summary} builderView={builderView} onGoBack={onGoBack} />
       <ActionsBlock summary={summary} kpiMargin={kpiMargin} />
 
       <ResultsCharts summary={summary} kpiMargin={kpiMargin} isCountKpi={summary.kpi_type !== "revenue"} />
