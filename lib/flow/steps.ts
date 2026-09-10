@@ -252,10 +252,13 @@ export const STEPS: Record<StepId, StepDefinition> = {
       return [
         { id: "columns.confirm", label: "Ja, dit klopt", tone: "primary", confirms: false },
         {
+          // Laat de gids de hele reeks met code doorlopen; duurt een paar minuten en loopt
+          // door als je de pagina sluit. Wordt door de kaart gestart, niet via /api/flow.
           id: "columns.inspect",
           label: "Laat de gids mijn data grondig nakijken",
           tone: "secondary",
           confirms: false,
+          local: true,
         },
       ];
     },
@@ -342,10 +345,13 @@ export const STEPS: Record<StepId, StepDefinition> = {
           confirms: false,
         },
         {
+          // Een vóórstel: de gids vult de kaart zichtbaar in, de gebruiker past aan en
+          // bevestigt zelf. Er is geen pad waarlangs een voorstel zichzelf toepast.
           id: "beliefs.suggest",
           label: "Vul dit voor me in op basis van mijn data",
           tone: "secondary",
           confirms: false,
+          local: true,
         },
       ];
     },
@@ -381,7 +387,7 @@ export const STEPS: Record<StepId, StepDefinition> = {
       const failed = failedRun(ctx);
       if (failed) {
         return [
-          { id: "launch.diagnose", label: "Laat de gids meekijken wat er misging", tone: "primary", confirms: false },
+          { id: "launch.diagnose", label: "Laat de gids meekijken wat er misging", tone: "primary", confirms: false, local: true },
           { id: "launch.adjust", label: "Mijn antwoorden aanpassen", tone: "secondary", confirms: false, goTo: "beliefs" },
           { id: "launch.retry", label: "Opnieuw proberen", tone: "secondary", confirms: true, confirmPrompt: "Ik probeer de berekening opnieuw met dezelfde antwoorden." },
         ];
@@ -425,12 +431,21 @@ export const STEPS: Record<StepId, StepDefinition> = {
         return [
           { id: "results.retune", label: "Mijn antwoorden aanpassen en opnieuw rekenen", tone: "primary", confirms: false, goTo: "beliefs" },
           { id: "results.redata", label: "Terug naar mijn data", tone: "secondary", confirms: false, goTo: "prepare" },
-          { id: "results.explain", label: "Leg uit wat hier misgaat", tone: "secondary", confirms: false },
+          { id: "results.explain", label: "Leg uit wat hier misgaat", tone: "secondary", confirms: false, local: true },
         ];
       }
       return [
         { id: "results.accept", label: "Duidelijk — ga door naar delen", tone: "primary", confirms: false },
-        { id: "results.explain", label: "Leg dit verder uit", tone: "secondary", confirms: false },
+        { id: "results.explain", label: "Leg dit verder uit", tone: "secondary", confirms: false, local: true },
+        {
+          // De uitgebreide analyse met grafieken: de gids verkent de uitkomst met code en levert
+          // figuren op. Duurt een paar minuten en wordt door de schil gestart.
+          id: "results.analysis",
+          label: run.result?.analysis ? "Analyse opnieuw maken" : "Maak een uitgebreide analyse",
+          tone: "secondary",
+          confirms: false,
+          local: true,
+        },
         { id: "results.retune", label: "Toch opnieuw afstemmen", tone: "secondary", confirms: false, goTo: "beliefs" },
       ];
     },
@@ -470,15 +485,17 @@ export const STEPS: Record<StepId, StepDefinition> = {
       // handelen nodig is.
       if (publishedRun(ctx)) {
         return [
-          { id: "share.view", label: "Bekijk het klantdashboard", tone: "primary", confirms: false },
+          // De link staat in de kaart; deze knop springt er alleen naartoe.
+          { id: "share.view", label: "Bekijk het klantdashboard", tone: "primary", confirms: false, local: true },
           { id: "share.again", label: "Een nieuwe berekening draaien", tone: "secondary", confirms: false, goTo: "beliefs" },
         ];
       }
       const run = completedRun(ctx);
       if (!run || !allows(run.validation, "publish")) return [];
+      // Geen aparte "laat eerst zien wat de klant ziet"-knop: dat overzicht staat al in de
+      // kaart, vóór de deelknop. Een knop die iets toont wat er al staat, voegt niets toe.
       return [
         { id: "share.publish", label: "Deel met de klant", tone: "primary", confirms: true, confirmPrompt: "De klant krijgt vanaf nu dit resultaat te zien op zijn eigen pagina, met de bandbreedte erbij." },
-        { id: "share.preview", label: "Laat eerst zien wat de klant ziet", tone: "secondary", confirms: false },
       ];
     },
   },

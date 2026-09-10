@@ -10,8 +10,10 @@
 import { UploadCard } from "@/components/flow/steps/UploadCard";
 import { ColumnsCard } from "@/components/flow/steps/ColumnsCard";
 import { QualityCard } from "@/components/flow/steps/QualityCard";
-import { BeliefsCard } from "@/components/flow/steps/BeliefsCard";
+import { BeliefsCard, type BeliefProposal } from "@/components/flow/steps/BeliefsCard";
 import { LaunchCard } from "@/components/flow/steps/LaunchCard";
+import { ResultCard } from "@/components/flow/steps/ResultCard";
+import { ShareCard } from "@/components/flow/steps/ShareCard";
 import type { BeliefAnswers } from "@/lib/flow/beliefs";
 import type { Ledger, StepId } from "@/lib/flow/steps";
 import { isRunning, type KpiType, type ProjectSnapshot } from "@/lib/types";
@@ -22,16 +24,22 @@ export function StepBody({
   snapshot,
   ledger,
   localSignal,
+  proposal,
   onPayloadChange,
   onChanged,
+  onGoBack,
 }: {
   stepId: StepId;
   projectId: string;
   snapshot: ProjectSnapshot;
   ledger: Ledger;
   localSignal: { actionId: string; n: number } | null;
+  /** Een voorstel van de gids voor stap 5 — zichtbaar ingevuld, nooit stil toegepast. */
+  proposal: BeliefProposal | null;
   onPayloadChange: (payload: Record<string, unknown> | null) => void;
   onChanged: () => void;
+  /** Terug naar een eerdere stap — de uitkomstkaart biedt dat aan als het model tekortkomt. */
+  onGoBack: (step: StepId) => void;
 }) {
   const source = snapshot.sources[0] ?? null;
 
@@ -62,7 +70,13 @@ export function StepBody({
   }
 
   if (stepId === "beliefs" && snapshot.approvedDataset) {
-    return <BeliefsCard dataset={snapshot.approvedDataset} onPayloadChange={onPayloadChange} />;
+    return (
+      <BeliefsCard
+        dataset={snapshot.approvedDataset}
+        proposal={proposal}
+        onPayloadChange={onPayloadChange}
+      />
+    );
   }
 
   if (stepId === "launch") {
@@ -82,6 +96,16 @@ export function StepBody({
           latest && (latest.run.state === "failed" || latest.run.state === "cancelled") ? latest : null
         }
       />
+    );
+  }
+
+  if (stepId === "results" || stepId === "share") {
+    const completed = snapshot.runs.find((r) => r.run.state === "completed") ?? null;
+    const margin = snapshot.project.kpi_margin ?? null;
+    return stepId === "results" ? (
+      <ResultCard run={completed} kpiMargin={margin} onGoBack={onGoBack} />
+    ) : (
+      <ShareCard projectId={projectId} run={completed} localSignal={localSignal} />
     );
   }
 

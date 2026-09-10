@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildClientSummaryRequest } from "@/lib/anthropic/clientSummary";
+import { checkNumbers } from "@/lib/ai/numberCheck";
 import type { ClientSummary, FitSummary } from "@/lib/types";
 import { withJsonErrors, claudeErrorMessage } from "@/lib/apiRoute";
 
@@ -66,19 +67,49 @@ async function handlePost(request: Request) {
     );
   }
 
+  const summary = run.summary as FitSummary;
   const client = new Anthropic({ apiKey });
-  const params = buildClientSummaryRequest(run.summary as FitSummary);
-  let response: Anthropic.Message;
-  try {
-    response = await client.messages.create(params);
-  } catch (err) {
-    return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });
+  const params = buildClientSummaryRequest(summary);
+
+  // Twee pogingen, en dan de tekst laten vallen. Waarom: deze samenvatting is geschreven om
+  // doorgestuurd en geciteerd te worden, en één verzonnen percentage erin is voor de lezer niet
+  // te onderscheiden van een juist percentage (zie lib/ai/numberCheck.ts en
+  // docs/CHAT_PIPELINE_HERZIENING.md §8.4). De cijfers zelf worden elders door code gerenderd,
+  // dus het wegvallen van deze tekst kost uitleg — geen feiten.
+  let text = "";
+  let unverifiable: string[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response: Anthropic.Message;
+    try {
+      response = await client.messages.create(params);
+    } catch (err) {
+      return NextResponse.json({ error: claudeErrorMessage(err) }, { status: 502 });
+    }
+    const candidate = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n\n");
+    const check = checkNumbers(candidate, summary);
+    if (check.ok) {
+      text = candidate;
+      unverifiable = [];
+      break;
+    }
+    unverifiable = check.unverifiable;
   }
 
-  const text = response.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("\n\n");
+  if (!text) {
+    return NextResponse.json(
+      {
+        error:
+          "De samenvatting bevatte getallen die ik niet kan terugvinden in de uitkomst " +
+          `(${unverifiable.slice(0, 5).join(", ")}), dus ik bewaar hem niet. De cijfers in het ` +
+          "overzicht zelf zijn wel juist — die komen rechtstreeks uit de berekening.",
+        unverifiable,
+      },
+      { status: 422 },
+    );
+  }
 
   const clientSummary: ClientSummary = {
     text,

@@ -19,9 +19,9 @@ opgebouwd.
 | 1 — Skelet | ✅ | `/projects/[id]/flow`: stappenbalk, permanent transcript, kaart-raamwerk, `POST /api/flow` |
 | 2 — Data-stappen | ✅ | Stap 1 t/m 4 werkend: doel, aanleveren (met vooraf-oordeel), kolommen (klikbaar), klaarmaken (bevindingen als keuzes) + de doorloop-test op de demo-CSV |
 | 3 — Model-stappen | ✅ | Stap 5 (verwachtingen per kanaal, "weet ik niet" overal) en 6 (overzicht vóór de berekening, echte voortgang); de oude wizard verwijderd; de projectenlijst gebruikt nu dezelfde afleiding |
-| 4 — Uitkomst | — | |
-| 5 — AI-laag | — | |
-| 6 — Afronden | — | |
+| 4 — Uitkomst | ✅ | Stap 7 in vier lagen (kan ik hierop sturen → wat is er gebeurd → wat zou ik doen → de techniek, ingeklapt) en stap 8 met wat de klant wél en niet ziet |
+| 5 — AI-laag | ✅ | Nieuwe gids (`lib/ai/guide.ts`) met een gegenereerde briefing, vrij typen in elke stap, de drie AI-knoppen werkend, de getallencontrole uit §8.4, en de oude architect-keten verwijderd |
+| 6 — Afronden | ✅ | Documentatie bijgewerkt, dode routes weg, 118 tests in CI |
 
 Onderweg gevonden en meteen gerepareerd:
 
@@ -31,9 +31,16 @@ Onderweg gevonden en meteen gerepareerd:
   gedropt. De voortgangsregel stond daardoor voor élk project op stap 1, zonder dat iets een
   fout gaf. Hij gebruikt nu `deriveFlowState`, dezelfde afleiding als het traject zelf.
 
-Wat nog niet gebouwd is, zegt dat met zoveel woorden in plaats van stil te blijven: de
-AI-acties (stap 3 "laat de gids nakijken", stap 5 "vul dit voor me in", stap 6 "laat de gids
-meekijken") landen in fase 5, de uitkomstlagen in fase 4.
+Nog niet gedaan, en bewust: de **doorloop met een echte niet-technische gebruiker** (§8.5.1) en
+de **Playwright-doorloop** (§8.3). Alles hieronder is geverifieerd met typecheck, lint, build en
+118 tests — niet met een echte klik in een browser. Dat is de eerste stap na oplevering.
+
+Verwijderd omdat niets het meer aanriep: `lib/wizard/`, `components/wizard/`,
+`WizardChatContext`, `/api/prepare-auto`, `/api/chat`, `/api/fit-refine`,
+`lib/anthropic/architect.ts` en de drie contextbouwers die alleen die prompt dienden.
+`/api/datasets/[id]/column-notes` staat er nog maar wordt niet meer aangeroepen: de oude
+kolomkaart liet de bouwer per kolom een aantekening maken en daar is in de nieuwe flow nog geen
+plek voor. Bewust laten staan in plaats van stil weggooien.
 
 ---
 

@@ -21,6 +21,22 @@ import {
   type ChannelAnswers,
 } from "@/lib/flow/beliefs";
 import type { DatasetVersion } from "@/lib/types";
+import type { Carryover, MediaShare, SaturationBelief, SeasonalityBelief, Strength } from "@/lib/types";
+
+/**
+ * Wat de gids voorstelt als je hem vraagt dit in te vullen.
+ *
+ * Hetzelfde vormpje als de antwoorden zelf, en met dezelfde gesloten woordenschat — het
+ * schema van het gereedschap wordt uit diezelfde vraaglijsten gegenereerd (lib/ai/guide.ts).
+ * Een voorstel blijft een voorstel: het vult de kaart zichtbaar in, de gebruiker past aan en
+ * bevestigt zelf.
+ */
+export interface BeliefProposal {
+  reasoning?: string;
+  channels?: Record<string, { carryover?: Carryover; strength?: Strength; saturation?: SaturationBelief }>;
+  seasonality?: SeasonalityBelief;
+  media_share?: MediaShare;
+}
 
 function OptionRow<T extends string>({
   options,
@@ -54,18 +70,42 @@ function OptionRow<T extends string>({
 
 export function BeliefsCard({
   dataset,
+  proposal,
   onPayloadChange,
 }: {
   dataset: DatasetVersion;
+  /** Een ingevuld voorstel van de gids, of null. */
+  proposal: BeliefProposal | null;
   onPayloadChange: (payload: { answers: BeliefAnswers } | null) => void;
 }) {
   const channels = useMemo(() => channelsOf(dataset), [dataset]);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<BeliefAnswers>({ channels: {} });
+  const [tookProposal, setTookProposal] = useState(false);
 
   useEffect(() => {
     onPayloadChange({ answers });
   }, [answers, onPayloadChange]);
+
+  // Een voorstel wordt zichtbaar ingevuld, niet stil toegepast: de gebruiker ziet per kanaal
+  // staan wat de gids denkt en kan elk antwoord aanklikken om het te wijzigen. Alleen kanalen
+  // die echt in de data zitten worden overgenomen — een verzonnen kanaalnaam hoort hier niet
+  // binnen te komen, en als het gebeurt valt hij weg in plaats van een vraag te vervuilen.
+  useEffect(() => {
+    if (!proposal) return;
+    const known = new Set(channels.map((c) => c.name));
+    setAnswers((prev) => {
+      const next = { ...prev, channels: { ...prev.channels } };
+      for (const [name, given] of Object.entries(proposal.channels ?? {})) {
+        if (!known.has(name)) continue;
+        next.channels[name] = { ...next.channels[name], ...given };
+      }
+      if (proposal.seasonality) next.seasonality = proposal.seasonality;
+      if (proposal.media_share) next.media_share = proposal.media_share;
+      return next;
+    });
+    setTookProposal(true);
+  }, [proposal, channels]);
 
   const channel = channels[index];
   const answered = (name: string) => {
@@ -91,6 +131,12 @@ export function BeliefsCard({
 
   return (
     <div className="space-y-3">
+      {tookProposal && (
+        <p className="rounded-lg border border-accent/30 bg-accent-dim px-3 py-2 text-xs text-fg">
+          De gids heeft dit voor je ingevuld. Loop het na en wijzig wat niet klopt — er gebeurt
+          niets tot je op &ldquo;Hiermee verder&rdquo; klikt.
+        </p>
+      )}
       {/* Kanaalkiezer: waar ben je, en hoeveel heb je gehad. */}
       <div className="flex flex-wrap items-center gap-1.5">
         {channels.map((c, i) => (

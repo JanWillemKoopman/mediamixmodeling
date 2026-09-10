@@ -29,13 +29,13 @@ pip install -e "packages/mmm-core[model,dev]" -e "worker[dev]"
 ## Verificatie
 
 ```bash
-npm run lint && npm run typecheck && npm run build   # frontend
+npm run lint && npm run typecheck && npm test && npm run build   # frontend
 pytest packages/mmm-core                             # statistische kern, snel
 pytest packages/mmm-core -m slow                     # echte NUTS-fit: herstelmatrix
 pytest worker/tests                                  # levenscyclus zonder database
 ```
 
-Alle vier draaien ook in CI (`.github/workflows/ci.yml`).
+Alle vijf draaien ook in CI (`.github/workflows/ci.yml`).
 
 ## Structuur
 

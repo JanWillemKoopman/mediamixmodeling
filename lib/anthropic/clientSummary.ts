@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { ARCHITECT_ANALYST_MODEL } from "@/lib/anthropic/fitContext";
+import { ANALYST_MODEL } from "@/lib/ai/guide";
 import type { FitSummary } from "@/lib/types";
 
 // Klantgerichte samenvatting van een fit-resultaat — het sluitstuk van de presentatiestap
@@ -25,7 +25,7 @@ Regels:
 
 export function buildClientSummaryRequest(summary: FitSummary): Anthropic.MessageCreateParamsNonStreaming {
   return {
-    model: ARCHITECT_ANALYST_MODEL,
+    model: ANALYST_MODEL,
     max_tokens: 3000,
     thinking: { type: "adaptive" },
     output_config: { effort: "medium" },

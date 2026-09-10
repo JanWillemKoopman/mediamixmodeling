@@ -269,6 +269,26 @@ async function handleBeliefs(ctx: HandlerContext): Promise<HandlerResult> {
   const problems = validateIntent(intent, dataset.column_roles ?? {});
   if (problems.length > 0) return { error: problems[0], status: 400 };
 
+  // De vrije tekst over het bedrijf hoort niet alleen in de intentie thuis maar ook in
+  // mmm.project_context: daar leest de gids hem (lib/ai/guide.ts factsBlock), en een volgende
+  // berekening op nieuwe data kan er opnieuw uit afleiden. Alleen in de intentie zetten zou
+  // hem opsluiten in één configuratie.
+  if (answers.context?.trim()) {
+    const supabase = createClient();
+    await supabase
+      .schema("mmm")
+      .from("project_context")
+      .upsert(
+        {
+          project_id: ctx.projectId,
+          description: answers.context.trim(),
+          updated_by: ctx.userId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "project_id" },
+      );
+  }
+
   const channels = channelsOf(dataset);
   const answered = channels.filter((c) => {
     const a = answers.channels[c.name];
@@ -315,6 +335,34 @@ async function handleLaunch(ctx: HandlerContext): Promise<HandlerResult> {
   };
 }
 
+/**
+ * Publiceren naar het klantdashboard.
+ *
+ * Gaat via `mmm.publish_run()`: die functie weigert een run die zijn eigen drempel niet haalt,
+ * en dat is de grens die telt. De knop verschijnt hier al niet zonder toestemming, maar een
+ * knop die niet verschijnt is geen beveiliging.
+ */
+async function handlePublish(ctx: HandlerContext): Promise<HandlerResult> {
+  const run = ctx.snapshot.runs.find((r) => r.run.state === "completed");
+  if (!run) return { error: "Er is geen afgerond resultaat om te delen.", status: 409 };
+
+  const supabase = createClient();
+  const { error } = await supabase.schema("mmm").rpc("publish_run", {
+    p_project_id: ctx.projectId,
+    p_model_run_id: run.run.id,
+  });
+  if (error) return { error: error.message, status: 409 };
+
+  return {
+    decision: {
+      step: "share",
+      data: { model_run_id: run.run.id },
+      summary: "Gedeeld met de klant",
+    },
+    note: "Deel met de klant.",
+  };
+}
+
 async function handleAcceptResults(ctx: HandlerContext): Promise<HandlerResult> {
   return {
     decision: { step: "results", data: { seen: true }, summary: "Uitkomst bekeken" },
@@ -352,6 +400,7 @@ const HANDLERS: Record<string, Handler> = {
   "launch.retry": handleLaunch,
   "launch.again": handleLaunch,
   "results.accept": handleAcceptResults,
+  "share.publish": handlePublish,
 };
 
 // --- de route zelf -------------------------------------------------------------------
