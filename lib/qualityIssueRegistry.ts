@@ -98,6 +98,11 @@ export const QUALITY_ISSUE_REGISTRY: Record<string, QualityIssueInfo> = {
       "De essentiële bestanden delen geen enkele week — er is letterlijk geen periode waarin KPI én spend allebei bestaan.",
     action: "Controleer de datumkolommen (formaat!) en de periodes van de bestanden.",
   },
+  duplicate_rows: {
+    explain:
+      "Rijen die in élke kolom identiek zijn aan een eerdere rij zijn bewaard: dit bestand heeft meerdere regels per week, en dan kunnen dat twee echte boekingen zijn die horen op te tellen.",
+    action: "Was het toch een dubbele export? Zeg het, dan halen we ze eruit.",
+  },
   duplicate_rows_dropped: {
     explain:
       "Rijen die in élke kolom identiek waren aan een eerdere rij zijn verwijderd. Zou dat niet gebeuren, dan telde die week dubbel: zowel de KPI als alle spend.",

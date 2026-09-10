@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { recommendedActions } from "@/lib/dashboardInsights";
+import { moneyKpis, recommendedActions, totalMediaSpend, volumeChannels } from "@/lib/dashboardInsights";
 import type { ChannelResult, FitSummary, Interval, KpiType } from "@/lib/types";
 
 const iv = (p50: number, p3 = p50 * 0.7, p97 = p50 * 1.3): Interval => ({ p3, p50, p97 });
 
-function channel(name: string, roasP50: number, spend: number): ChannelResult {
+function channel(
+  name: string,
+  roasP50: number,
+  spend: number,
+  unit: ChannelResult["unit"] = "currency",
+): ChannelResult {
   return {
     name,
     absolute_contribution: iv(1_000),
@@ -13,7 +18,7 @@ function channel(name: string, roasP50: number, spend: number): ChannelResult {
     adstock_half_life_weeks: iv(2),
     saturation_point: iv(10_000),
     total_spend: spend,
-    unit: "currency",
+    unit,
   };
 }
 
@@ -92,5 +97,36 @@ describe("adviezen spreken elkaar niet tegen", () => {
     const cut = recommendedActions(withPlan).find((a) => a.kind === "cut");
     // tv gaat omhoog in het plan, dus mag niet in hetzelfde paneel "afbouwen" krijgen.
     expect(cut?.text ?? "").not.toContain("tv_spend");
+  });
+});
+
+
+describe("een euro-totaal telt alleen euro's", () => {
+  // Het MediaMarkt-geval: 57% van "70.506.754 besteed" waren e-mailverzendingen.
+  const mixed = summary("orders", [
+    channel("tv_spend", 0.0159, 8_952_002),
+    channel("search_brand_spend", 0.0565, 2_616_210),
+    channel("email_verzendingen", 0.003, 39_963_000, "sendings"),
+  ]);
+
+  it("laat volumekanalen buiten het bedrag", () => {
+    expect(totalMediaSpend(mixed)).toBe(8_952_002 + 2_616_210);
+    expect(moneyKpis(mixed).totalSpend).toBe(11_568_212);
+  });
+
+  it("noemt de volumekanalen wel apart, zodat ze niet verdwijnen", () => {
+    expect(volumeChannels(mixed).map((c) => c.name)).toEqual(["email_verzendingen"]);
+  });
+
+  it("deelt het rendement per euro door de schone noemer", () => {
+    const { blendedRoas } = moneyKpis(mixed);
+    // 3 kanalen x 1.000 bijdrage = 3.000; oude noemer gaf 0,00006, nieuwe 0,00026.
+    expect(blendedRoas).toBeCloseTo(3_000 / 11_568_212, 10);
+  });
+
+  it("verandert niets als alles al in euro's staat", () => {
+    const allEuros = summary("revenue", [channel("tv_spend", 0.4, 100_000)]);
+    expect(totalMediaSpend(allEuros)).toBe(100_000);
+    expect(volumeChannels(allEuros)).toHaveLength(0);
   });
 });

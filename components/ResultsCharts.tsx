@@ -17,6 +17,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { currencyChannels, totalMediaSpend, volumeChannels } from "@/lib/dashboardInsights";
 import type { BaselineDecomposition, FitSummary, ResponseCurve, WeeklyDecomposition } from "@/lib/types";
 
 // Deterministic, zero-cost charts drawn straight from the numbers already in FitSummary —
@@ -164,7 +165,10 @@ function SplitTooltip({ active, payload }: { active?: boolean; payload?: { paylo
 // marketingbijdrage is de som van de kanaal-banden — iets ruimer dan de exacte gezamenlijke
 // band, dus een voorzichtige (eerlijke) weergave.
 function ScoreCards({ summary, kpiMargin, marginUnit }: { summary: FitSummary; kpiMargin?: number | null; marginUnit: string }) {
-  const spend = summary.channels.reduce((s, ch) => s + ch.total_spend, 0);
+  // Alleen euro's: een totaal waar e-mailverzendingen in meetellen is geen bedrag, en het
+  // rendement-per-euro eronder deelt door diezelfde noemer.
+  const spend = totalMediaSpend(summary);
+  const volume = volumeChannels(summary);
   const marketingP50 = summary.channels.reduce((s, ch) => s + ch.absolute_contribution.p50, 0);
   const marketingP3 = summary.channels.reduce((s, ch) => s + ch.absolute_contribution.p3, 0);
   const marketingP97 = summary.channels.reduce((s, ch) => s + ch.absolute_contribution.p97, 0);
@@ -173,7 +177,10 @@ function ScoreCards({ summary, kpiMargin, marginUnit }: { summary: FitSummary; k
     {
       label: "Totaal besteed",
       value: fmt(spend),
-      sub: "alle kanalen samen, hele periode",
+      sub:
+        volume.length === 0
+          ? "alle kanalen samen, hele periode"
+          : `betaalde kanalen, hele periode — ${volume.map((c) => c.name).join(", ")} ${volume.length === 1 ? "staat" : "staan"} in eigen eenheid en telt niet mee`,
     },
     {
       label: `Door marketing gedreven ${summary.kpi}`,
@@ -551,35 +558,68 @@ function FitVsActualChart({ weekly, coverage }: { weekly: WeeklyDecomposition; c
 // --- Blok 2: Wat leverde elk kanaal op? ---------------------------------------------
 
 // De kernvergelijking: kosten-balk naast opbrengst-balk, per kanaal.
-function SpendVsReturnChart({ summary }: { summary: FitSummary }) {
+//
+// Twee balken naast elkaar met "de langste wint" is alleen waar als ze dezelfde eenheid
+// hebben. Bij een KPI in aantallen is dat niet zo: tv kostte 8.952.002 euro en leverde
+// 142.110 toestellen op, en de grijze balk is dan 63x zo lang zonder dat er iets
+// verliesgevends aan is. Met een marge is de opbrengst wél in euro's uit te drukken en
+// klopt de vergelijking; zonder marge krijgen de twee reeksen een eigen as en vervalt de
+// uitspraak over wie er langer is.
+function SpendVsReturnChart({ summary, kpiMargin }: { summary: FitSummary; kpiMargin?: number | null }) {
+  // Bij een omzet-KPI staat de bijdrage al in euro's, dus is de omrekenfactor 1.
+  const toMoney = summary.kpi_type === "revenue" ? 1 : kpiMargin != null && kpiMargin > 0 ? kpiMargin : null;
+  const comparable = toMoney != null;
+  const factor = toMoney ?? 1;
+
   const data = [...summary.channels]
     .sort((a, b) => b.absolute_contribution.p50 - a.absolute_contribution.p50)
     .map((ch) => ({
       name: ch.name,
       kosten: ch.total_spend,
-      opbrengst: Math.max(0, ch.absolute_contribution.p50),
+      opbrengst: Math.max(0, ch.absolute_contribution.p50) * factor,
       errorRange: [
-        Math.max(0, ch.absolute_contribution.p50 - ch.absolute_contribution.p3),
-        Math.max(0, ch.absolute_contribution.p97 - ch.absolute_contribution.p50),
+        Math.max(0, ch.absolute_contribution.p50 - ch.absolute_contribution.p3) * factor,
+        Math.max(0, ch.absolute_contribution.p97 - ch.absolute_contribution.p50) * factor,
       ] as [number, number],
     }));
+
   return (
     <ChartCard
       title="Wat kostte het, wat leverde het op?"
-      hint={`Per kanaal: grijs = uitgegeven, groen = geschatte opbrengst in ${summary.kpi} (met onzekerheidsstreep). Is de groene balk langer dan de grijze, dan verdiende het kanaal zichzelf terug.`}
+      hint={
+        comparable
+          ? `Per kanaal: grijs = uitgegeven, groen = geschatte opbrengst in euro's (met onzekerheidsstreep). Beide in euro's, dus: is de groene balk langer dan de grijze, dan verdiende het kanaal zichzelf terug.`
+          : `Per kanaal: grijs = uitgegeven in euro's, groen = geschatte opbrengst in ${summary.kpi}. Dat zijn verschillende eenheden, dus ze hebben elk een eigen as en zegt de lengte niets over terugverdienen. Vul bij stap 3 de marge per ${summary.kpi} in, dan zetten we ze allebei in euro's naast elkaar.`
+      }
     >
       <ResponsiveContainer width="100%" height={Math.max(140, data.length * 44)} className="overflow-hidden">
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, bottom: 0, left: 4 }} barGap={2}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
-          <XAxis type="number" tick={AXIS} tickFormatter={fmtShort} />
+          <XAxis type="number" xAxisId="kosten" tick={AXIS} tickFormatter={fmtShort} />
+          {!comparable && (
+            <XAxis type="number" xAxisId="opbrengst" orientation="top" tick={AXIS} tickFormatter={fmtShort} stroke={ACCENT} />
+          )}
           <YAxis type="category" dataKey="name" tick={AXIS} width={100} />
           <Tooltip
             cursor={{ fill: "rgba(25,36,59,0.05)" }}
             contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid rgba(25,36,59,0.14)" }}
-            formatter={(v) => (typeof v === "number" ? fmt(v) : String(v))}
+            formatter={(v, n) =>
+              typeof v !== "number"
+                ? String(v)
+                : n === "opbrengst" && !comparable
+                  ? `${fmt(v)} ${summary.kpi}`
+                  : `€ ${fmt(v)}`
+            }
           />
-          <Bar dataKey="kosten" fill={NEUTRAL} radius={[0, 3, 3, 0]} barSize={11} name="kosten" />
-          <Bar dataKey="opbrengst" fill={ACCENT} radius={[0, 3, 3, 0]} barSize={11} name="opbrengst">
+          <Bar dataKey="kosten" xAxisId="kosten" fill={NEUTRAL} radius={[0, 3, 3, 0]} barSize={11} name="kosten" />
+          <Bar
+            dataKey="opbrengst"
+            xAxisId={comparable ? "kosten" : "opbrengst"}
+            fill={ACCENT}
+            radius={[0, 3, 3, 0]}
+            barSize={11}
+            name="opbrengst"
+          >
             <ErrorBar dataKey="errorRange" direction="x" width={3} stroke={ACCENT} strokeOpacity={0.5} />
           </Bar>
         </BarChart>
@@ -590,10 +630,14 @@ function SpendVsReturnChart({ summary }: { summary: FitSummary }) {
 
 // Aandeel budget vs. aandeel effect: de scheefheids-detector.
 function BudgetVsEffectChart({ summary }: { summary: FitSummary }) {
-  const totalSpend = summary.channels.reduce((s, ch) => s + ch.total_spend, 0);
-  const totalEffect = summary.channels.reduce((s, ch) => s + Math.max(0, ch.absolute_contribution.p50), 0);
+  // "Aandeel in het budget" kan alleen over kanalen die hetzelfde budget delen. Reken je
+  // verzendingen mee, dan krijgt e-mail 57% van het budget omdat er nu eenmaal meer mails
+  // dan euro's zijn — en lijkt het kanaal met afstand de grootste post.
+  const paid = currencyChannels(summary);
+  const totalSpend = paid.reduce((s, ch) => s + ch.total_spend, 0);
+  const totalEffect = paid.reduce((s, ch) => s + Math.max(0, ch.absolute_contribution.p50), 0);
   if (totalSpend <= 0 || totalEffect <= 0) return null;
-  const data = summary.channels.map((ch) => ({
+  const data = paid.map((ch) => ({
     name: ch.name,
     budget: (ch.total_spend / totalSpend) * 100,
     effect: (Math.max(0, ch.absolute_contribution.p50) / totalEffect) * 100,
@@ -890,7 +934,7 @@ export function ResultsCharts({
       {/* ---- Blok 2: Wat leverde elk kanaal op? ---- */}
       <SectionHeader title="Wat leverde elk kanaal op?" subtitle="De afrekening per kanaal — altijd met eerlijke onzekerheidsmarge." />
       <div className="grid gap-6 lg:grid-cols-2">
-        <SpendVsReturnChart summary={summary} />
+        <SpendVsReturnChart summary={summary} kpiMargin={kpiMargin} />
         <ChartCard
           title="Rendement per kanaal (ROAS)"
           hint={

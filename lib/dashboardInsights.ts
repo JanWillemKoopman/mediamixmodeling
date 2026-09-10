@@ -4,7 +4,33 @@
 // dezelfde cijfers en dezelfde woorden gebruiken. Alles hier is deterministisch: het leest
 // uitsluitend getallen die al in de FitSummary staan, geen extra rekengang of AI-aanroep.
 
-import type { FitSummary, Interval, ResponseCurve } from "./types";
+import type { ChannelResult, FitSummary, Interval, ResponseCurve } from "./types";
+
+/**
+ * De media-euro's, en alleen die.
+ *
+ * `total_spend` staat per kanaal in zijn eigen eenheid. Alles bij elkaar optellen levert
+ * een getal op dat er als een bedrag uitziet maar het niet is: bij MediaMarkt was 57% van
+ * de "70.506.754 besteed" e-mailverzendingen, plus 112 eenheden van twee 0/1-vlaggen. De
+ * kop "0,01 per bestede euro" deelde vervolgens door die vervuilde noemer — op echte
+ * euro's was het 0,028.
+ *
+ * Elke plek die een bedrag of een rendement-per-euro toont, telt daarom alleen de
+ * currency-kanalen. Volumekanalen (verzendingen, vertoningen, GRP's, clicks) horen thuis in
+ * hun eigen eenheid, niet in een euro-totaal.
+ */
+export function currencyChannels(summary: FitSummary): ChannelResult[] {
+  return summary.channels.filter((ch) => ch.unit === "currency");
+}
+
+export function totalMediaSpend(summary: FitSummary): number {
+  return currencyChannels(summary).reduce((s, ch) => s + ch.total_spend, 0);
+}
+
+/** Kanalen die wél druk hebben maar niet in euro's — apart te noemen, nooit op te tellen. */
+export function volumeChannels(summary: FitSummary): ChannelResult[] {
+  return summary.channels.filter((ch) => ch.unit !== "currency" && ch.total_spend > 0);
+}
 
 // --- Geld-KPI's: de vier/vijf getallen voor de directietafel -------------------------
 
@@ -24,7 +50,7 @@ export interface MoneyKpis {
 }
 
 export function moneyKpis(summary: FitSummary, kpiMargin?: number | null): MoneyKpis {
-  const totalSpend = summary.channels.reduce((s, ch) => s + ch.total_spend, 0);
+  const totalSpend = totalMediaSpend(summary);
   const marketing: Interval = {
     p3: summary.channels.reduce((s, ch) => s + ch.absolute_contribution.p3, 0),
     p50: summary.channels.reduce((s, ch) => s + ch.absolute_contribution.p50, 0),
