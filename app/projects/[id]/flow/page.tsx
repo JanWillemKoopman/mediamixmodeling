@@ -48,6 +48,8 @@ export default async function ProjectFlow({ params }: { params: { id: string } }
         projectName={snapshot.project.name}
         state={state}
         transcript={transcript}
+        source={snapshot.sources[0] ?? null}
+        dataset={snapshot.dataset}
       />
     </>
   );

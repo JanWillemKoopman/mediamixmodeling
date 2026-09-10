@@ -76,6 +76,12 @@ export interface StepAction {
   goTo?: StepId;
   /** Vraagt om vrije tekst in plaats van een enkele klik (bv. de bedrijfsomschrijving). */
   needsText?: boolean;
+  /**
+   * Wordt volledig in de kaart afgehandeld en gaat niet naar de server: een bestand kiezen,
+   * een sjabloon downloaden, terug naar de keuzes van deze stap. De flow-route weigert zo'n
+   * actie dan ook, zodat er geen tweede pad ontstaat waarlangs iets stiekem tóch iets doet.
+   */
+  local?: boolean;
 }
 
 /** Er gebeurt iets op de achtergrond waar de gebruiker op wacht. Geen doodlopende weg. */
@@ -169,18 +175,34 @@ export const STEPS: Record<StepId, StepDefinition> = {
     dependsOn: [],
     ledgerOnly: true,
     completableWithoutTyping: true,
-    isDone: (ctx) => ctx.ledger.goal != null,
+    // Twee vragen, en de stap is pas af als ze allebei beantwoord zijn. Zonder die tweede
+    // eis zou "doel gekozen" al een vinkje geven terwijl de helft nog open staat — precies
+    // het soort halve waarheid dat de oude voortgangsbalk toonde.
+    isDone: (ctx) => ctx.ledger.goal?.decision.kpi_type != null,
     blockedReason: () => null,
     waiting: () => null,
     factDecidedAt: (ctx) => ctx.ledger.goal?.decided_at ?? null,
-    actions: (ctx) =>
-      ctx.ledger.goal
-        ? [{ id: "goal.change", label: "Ander doel kiezen", tone: "secondary", confirms: false }]
-        : [
-            { id: "goal.budget", label: "Mijn budget beter verdelen", tone: "primary", confirms: false },
-            { id: "goal.effect", label: "Aantonen wat mijn kanalen opleveren", tone: "primary", confirms: false },
-            { id: "goal.report", label: "Periodiek rapporteren", tone: "primary", confirms: false },
-          ],
+    actions: (ctx) => {
+      const decision = ctx.ledger.goal?.decision ?? {};
+      if (decision.aim == null) {
+        return [
+          { id: "goal.budget", label: "Mijn budget beter verdelen", tone: "primary", confirms: false },
+          { id: "goal.effect", label: "Aantonen wat mijn kanalen opleveren", tone: "primary", confirms: false },
+          { id: "goal.report", label: "Periodiek rapporteren", tone: "primary", confirms: false },
+        ];
+      }
+      if (decision.kpi_type == null) {
+        // Waar de gebruiker op stuurt bepaalt de rekenwijze (geld of hele eenheden) en de
+        // woordkeuze van elk volgend scherm.
+        return [
+          { id: "goal.kpi_revenue", label: "Omzet in euro's", tone: "primary", confirms: false },
+          { id: "goal.kpi_orders", label: "Aantal bestellingen", tone: "primary", confirms: false },
+          { id: "goal.kpi_leads", label: "Aantal leads", tone: "primary", confirms: false },
+          { id: "goal.kpi_sessions", label: "Aantal bezoeken", tone: "primary", confirms: false },
+        ];
+      }
+      return [{ id: "goal.change", label: "Ander doel kiezen", tone: "secondary", confirms: false }];
+    },
   },
 
   data: {
@@ -207,8 +229,8 @@ export const STEPS: Record<StepId, StepDefinition> = {
             { id: "data.continue", label: "Verder met dit bestand", tone: "primary", confirms: false },
           ]
         : [
-            { id: "data.upload", label: "Kies je bestand", tone: "primary", confirms: false },
-            { id: "data.template", label: "Download een voorbeeldbestand", tone: "secondary", confirms: false },
+            { id: "data.upload", label: "Kies je bestand", tone: "primary", confirms: false, local: true },
+            { id: "data.template", label: "Download een voorbeeldbestand", tone: "secondary", confirms: false, local: true },
             { id: "data.demo", label: "Gebruik een demo-dataset", tone: "secondary", confirms: false },
           ],
   },
@@ -233,9 +255,10 @@ export const STEPS: Record<StepId, StepDefinition> = {
     actions: (ctx) => {
       const src = source(ctx);
       if (!src) return [];
+      // Geen aparte "iets aanpassen"-knop: de rollen zijn in de kaart zelf aan te klikken.
+      // Een knop die alleen een bewerkmodus aanzet, is een extra stap zonder inhoud.
       return [
         { id: "columns.confirm", label: "Ja, dit klopt", tone: "primary", confirms: false },
-        { id: "columns.edit", label: "Iets aanpassen", tone: "secondary", confirms: false },
         {
           id: "columns.inspect",
           label: "Laat de gids mijn data grondig nakijken",
@@ -284,7 +307,7 @@ export const STEPS: Record<StepId, StepDefinition> = {
       if (ds?.status === "ready" && !ds.approved_at) {
         return [
           { id: "prepare.approve", label: "Dit ziet er goed uit", tone: "primary", confirms: true, confirmPrompt: "Hierna reken ik op deze data. Je kunt later terug, maar dan komt er een nieuwe versie bij." },
-          { id: "prepare.adjust", label: "Ik wil iets aanpassen", tone: "secondary", confirms: false },
+          { id: "prepare.adjust", label: "Ik wil iets aanpassen", tone: "secondary", confirms: false, local: true },
         ];
       }
       if (ctx.snapshot.approvedDataset) {

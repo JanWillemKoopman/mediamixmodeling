@@ -17,7 +17,7 @@ opgebouwd.
 |---|---|---|
 | 0 — Fundament | ✅ | `0024_flow_ledger.sql` (toegepast), `lib/flow/steps.ts` + `state.ts` + `ledger.ts`, de invarianten over 1584 toestanden, de route-bestaan-test |
 | 1 — Skelet | ✅ | `/projects/[id]/flow`: stappenbalk, permanent transcript, kaart-raamwerk, `POST /api/flow` |
-| 2 — Data-stappen | — | |
+| 2 — Data-stappen | ✅ | Stap 1 t/m 4 werkend: doel, aanleveren (met vooraf-oordeel), kolommen (klikbaar), klaarmaken (bevindingen als keuzes) + de doorloop-test op de demo-CSV |
 | 3 — Model-stappen | — | |
 | 4 — Uitkomst | — | |
 | 5 — AI-laag | — | |

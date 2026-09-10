@@ -17,25 +17,37 @@ import { humanizeError } from "@/lib/humanizeMessage";
 import { Conversation } from "@/components/flow/Conversation";
 import { FlowRail } from "@/components/flow/FlowRail";
 import { StepCard } from "@/components/flow/StepCard";
+import { StepBody } from "@/components/flow/StepBody";
 import type { FlowState } from "@/lib/flow/state";
 import type { StepAction, StepId } from "@/lib/flow/steps";
 import type { TranscriptEntry } from "@/lib/flow/transcript";
+import type { DatasetVersion, SourceFile } from "@/lib/types";
 
 export function FlowShell({
   projectId,
   projectName,
   state,
   transcript,
+  source,
+  dataset,
 }: {
   projectId: string;
   projectName: string;
   state: FlowState;
   transcript: TranscriptEntry[];
+  source: SourceFile | null;
+  dataset: DatasetVersion | null;
 }) {
   const router = useRouter();
   const [viewingStepId, setViewingStepId] = useState<StepId>(state.activeStepId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Wat de kaart van deze stap heeft ingevuld (de kolomindeling, de gemaakte keuzes). Gaat
+  // mee met de eerstvolgende handeling, zodat beslissing en gevolg één aanroep zijn.
+  const [payload, setPayload] = useState<Record<string, unknown> | null>(null);
+  // Een lokale actie wordt niet naar de server gestuurd maar door de kaart zelf opgepakt.
+  // De teller zorgt dat twee keer dezelfde klik ook twee keer aankomt.
+  const [localSignal, setLocalSignal] = useState<{ actionId: string; n: number } | null>(null);
 
   // Schuift de actieve stap op (door een handeling, of doordat de worker klaar is), dan
   // schuift het beeld mee — tenzij de gebruiker zelf naar een eerdere stap is gegaan.
@@ -105,12 +117,17 @@ export function FlowShell({
         setPinned(action.goTo !== state.activeStepId);
         return;
       }
+      // Een bestand kiezen of een sjabloon downloaden gebeurt in de kaart zelf.
+      if (action.local) {
+        setLocalSignal((prev) => ({ actionId: action.id, n: (prev?.n ?? 0) + 1 }));
+        return;
+      }
       setBusy(true);
       try {
         const res = await fetch("/api/flow", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project_id: projectId, action_id: action.id }),
+          body: JSON.stringify({ project_id: projectId, action_id: action.id, payload }),
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -126,7 +143,7 @@ export function FlowShell({
         setBusy(false);
       }
     },
-    [projectId, router, state.activeStepId],
+    [projectId, router, state.activeStepId, payload],
   );
 
   const viewing = state.steps.find((s) => s.id === viewingStepId) ?? state.steps[0];
@@ -170,7 +187,16 @@ export function FlowShell({
             </div>
           )}
 
-          <div className="pt-1">
+          <div className="space-y-3 pt-1">
+            <StepBody
+              stepId={viewing.id}
+              projectId={projectId}
+              source={source}
+              dataset={dataset}
+              localSignal={localSignal}
+              onPayloadChange={setPayload}
+              onChanged={() => router.refresh()}
+            />
             <StepCard step={viewing} busy={busy} error={error} onAction={runAction} />
           </div>
         </div>
