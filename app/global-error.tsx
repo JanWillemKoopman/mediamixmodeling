@@ -1,9 +1,20 @@
 "use client";
 
+import { useEffect } from "react";
+import { flush, logError } from "@/lib/log/client";
+
 // Laatste vangnet: vangt fouten in de root-layout zelf, waar app/error.tsx niet meer
 // kan renderen. Moet zijn eigen <html>/<body> leveren en kan niet op globals.css
 // rekenen, dus bewust simpele inline styling.
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // Hier is de root-layout stuk, dus EventLogger draait niet meer. Zelf melden en meteen
+  // versturen: dit is de ernstigste fout die de app kan hebben, en zonder deze regel is hij
+  // nergens terug te zien.
+  useEffect(() => {
+    logError("layout.crash", error, { digest: error.digest ?? null });
+    flush(true);
+  }, [error]);
+
   return (
     <html lang="nl">
       <body

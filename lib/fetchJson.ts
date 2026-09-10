@@ -1,7 +1,11 @@
+"use client";
+
 // Safe JSON fetch for client components. Platform layers (Vercel timeouts, proxies)
 // can answer with plain text like "An error occurred with your deployment" — a blind
 // `res.json()` then throws "Unexpected token 'A' … is not valid JSON" and takes the UI
 // down with it. This helper always resolves to a usable shape.
+import { logEvent, loggedFetch } from "@/lib/log/client";
+
 export interface JsonResult<T = Record<string, unknown>> {
   ok: boolean;
   status: number;
@@ -27,7 +31,9 @@ export async function fetchJson<T = Record<string, unknown>>(
 ): Promise<JsonResult<T>> {
   let res: Response;
   try {
-    res = await fetch(input, init);
+    // loggedFetch en niet fetch: elke mislukte of trage aanroep hoort in het logboek, ook
+    // (juist) als de UI hem netjes opvangt en de gebruiker niets bijzonders ziet.
+    res = await loggedFetch(String(input), init);
   } catch {
     return {
       ok: false,
@@ -49,6 +55,14 @@ export async function fetchJson<T = Record<string, unknown>>(
     return { ok: true, status: res.status, data, error: null };
   }
   const serverError = parsed ? (data as { error?: unknown })?.error : null;
+  // Het antwoord van de server is niet OK. loggedFetch logde al dát het misging; hier komt
+  // erbij wát de server zei — de enige tekst die een echte diagnose mogelijk maakt.
+  logEvent({
+    level: "error",
+    event: "api.foutmelding",
+    message: typeof serverError === "string" ? serverError : `status ${res.status} zonder JSON-melding`,
+    detail: { url: String(input), status: res.status, json_geparsed: parsed },
+  });
   return {
     ok: false,
     status: res.status,

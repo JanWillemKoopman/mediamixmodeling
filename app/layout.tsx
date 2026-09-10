@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import { EventLogger } from "@/components/EventLogger";
 
 // De referentie zet alles in Aeonik — een gelicenseerde geometrische grotesk die we niet
 // mogen meeleveren. Plus Jakarta Sans komt van de vrij beschikbare families het dichtst bij
@@ -40,7 +41,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('js')" }}
         />
       </head>
-      <body className="font-sans">{children}</body>
+      <body className="font-sans">
+        {/* Het logboek: legt handelingen en fouten vast zodat een testronde achteraf na te
+            lezen is. Zie docs/LOGBOEK.md. */}
+        <EventLogger />
+        {children}
+      </body>
     </html>
   );
 }

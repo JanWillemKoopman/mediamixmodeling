@@ -43,7 +43,7 @@ export default async function ProjectsPage() {
 
   return (
     <>
-      <TopBar email={viewer.email} guideMarkdown={getHandleidingMarkdown()} />
+      <TopBar email={viewer.email} guideMarkdown={getHandleidingMarkdown()} logboek />
       <main className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
         <PageHeader title="Projecten" subtitle="Elk project is één modelbouw voor één klant." />
 

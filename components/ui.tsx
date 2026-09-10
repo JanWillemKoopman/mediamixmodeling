@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LogOut } from "lucide-react";
+import { LogOut, ScrollText } from "lucide-react";
 import { humanizeError } from "@/lib/humanizeMessage";
 import { GuideModal } from "@/components/GuideModal";
 import type { ProjectStatus, RunState } from "@/lib/types";
@@ -196,9 +196,13 @@ export function TopBar({
   email,
   guideMarkdown,
   homeHref = "/projects",
+  logboek = false,
 }: {
   email: string | null;
   guideMarkdown?: string;
+  // Alleen op bouwersschermen. Een klant heeft geen toegang tot het logboek, en een link die
+  // gegarandeerd op "geen toegang" uitkomt hoort er niet te staan.
+  logboek?: boolean;
   // Waar het logo naartoe linkt. Default "/projects" (bouwerslijst) — maar een klant zonder
   // builder-rechten die daarop klikt, loopt vast op een "geen toegang"-pagina. Het
   // klantdashboard geeft hier expliciet zijn eigen route mee, zodat het logo daar nooit een
@@ -219,6 +223,16 @@ export function TopBar({
         {/* E-mail alleen op ruimere schermen — op mobiel zou het merk + knoppen
             verdringen; truncate vangt lange adressen op tablet af. */}
         <span className="hidden max-w-[16rem] truncate font-mono text-xs text-fg-faint sm:inline">{email}</span>
+        {logboek && (
+          <Link
+            href="/logboek"
+            aria-label="Logboek"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-fg-muted transition hover:border-border-strong hover:text-fg sm:px-3"
+          >
+            <ScrollText className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Logboek</span>
+          </Link>
+        )}
         {guideMarkdown && <GuideModal markdown={guideMarkdown} />}
         <form action="/auth/signout" method="post">
           {/* Op mobiel alleen het icoon (kleinere knop, geen verdringing); tekst

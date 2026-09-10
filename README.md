@@ -52,6 +52,9 @@ Alle vijf draaien ook in CI (`.github/workflows/ci.yml`).
   de kaart van de stap waar je staat. De toestand wordt deterministisch afgeleid uit de
   feiten plus het stappen-grootboek en kost geen tokens; de AI legt alleen uit en doet
   voorstellen. Zie [`docs/CHAT_PIPELINE_HERZIENING.md`](docs/CHAT_PIPELINE_HERZIENING.md).
+- `app/logboek` — **het logboek** van een testronde: wat er is aangeklikt en wat er misging,
+  browser en server op één tijdlijn, met een knop die het geheel kopieert voor Claude Code.
+  Zie [`docs/LOGBOEK.md`](docs/LOGBOEK.md).
 - `app/dashboard/[projectId]` — **klant-weergave**: alleen gepubliceerde resultaten,
   read-only, altijd met zichtbare onzekerheid. Geen chat, geen ruwe data.
 

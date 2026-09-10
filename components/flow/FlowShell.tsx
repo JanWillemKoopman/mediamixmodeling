@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { humanizeError } from "@/lib/humanizeMessage";
+import { logAction, logError, loggedFetch } from "@/lib/log/client";
 import { Composer } from "@/components/flow/Composer";
 import { Conversation } from "@/components/flow/Conversation";
 import { FlowRail } from "@/components/flow/FlowRail";
@@ -144,14 +145,16 @@ export function FlowShell({
       setError(null);
       setBusy(true);
       setStreaming("");
+      logAction("flow.vraag", { stap: viewingStepId, preset: input.preset ?? null, tekens: input.message?.length ?? 0 }, projectId);
       try {
-        const res = await fetch("/api/flow/ask", {
+        const res = await loggedFetch("/api/flow/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ project_id: projectId, step: viewingStepId, ...input }),
         });
         if (!res.ok || !res.body) {
           const json = await res.json().catch(() => ({}));
+          logError("flow.vraag.mislukt", json.error ?? `status ${res.status}`, { stap: viewingStepId, status: res.status }, projectId);
           setError(humanizeError(json.error, "De gids kon niet antwoorden.").text);
           return;
         }
@@ -179,11 +182,13 @@ export function FlowShell({
             } else if (event.type === "done") {
               if (event.proposal) setProposal(event.proposal as BeliefProposal);
             } else if (event.type === "error") {
+              logError("flow.vraag.stroomfout", event.error ?? "onbekend", { stap: viewingStepId }, projectId);
               setError(humanizeError(event.error, "De gids liep vast.").text);
             }
           }
         }
-      } catch {
+      } catch (err) {
+        logError("flow.vraag.verbinding", err, { stap: viewingStepId }, projectId);
         setError("Er ging iets mis met de verbinding.");
       } finally {
         setBusy(false);
@@ -198,6 +203,14 @@ export function FlowShell({
   const runAction = useCallback(
     async (action: StepAction) => {
       setError(null);
+      // Elke handeling van de gebruiker komt hier langs — dit is dus de plek waar het
+      // logboek leest als een verslag van wat hij deed, en niet als losse fouten.
+      logAction("flow.actie", {
+        actie: action.id,
+        stap_in_beeld: viewingStepId,
+        actieve_stap: state.activeStepId,
+        ingevulde_velden: payload ? Object.keys(payload) : [],
+      }, projectId);
       // Teruggaan verandert niets aan je gegevens; dat hoeft niet langs de server.
       if (action.goTo) {
         setViewingStepId(action.goTo);
@@ -229,13 +242,14 @@ export function FlowShell({
       if (task) {
         setBusy(true);
         try {
-          const res = await fetch(task.url, {
+          const res = await loggedFetch(task.url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(task.body),
           });
           if (!res.ok) {
             const json = await res.json().catch(() => ({}));
+            logError("flow.achtergrondtaak.mislukt", json.error ?? `status ${res.status}`, { actie: action.id, url: task.url, status: res.status }, projectId);
             setError(humanizeError(json.error, task.whenFailed).text);
           }
           router.refresh();
@@ -252,26 +266,28 @@ export function FlowShell({
       }
       setBusy(true);
       try {
-        const res = await fetch("/api/flow", {
+        const res = await loggedFetch("/api/flow", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ project_id: projectId, action_id: action.id, payload }),
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
+          logError("flow.actie.geweigerd", json.error ?? `status ${res.status}`, { actie: action.id, stap: viewingStepId, status: res.status }, projectId);
           setError(humanizeError(json.error, "Dat lukte niet — probeer het opnieuw.").text);
           router.refresh();
           return;
         }
         setPinned(false);
         router.refresh();
-      } catch {
+      } catch (err) {
+        logError("flow.actie.verbinding", err, { actie: action.id, stap: viewingStepId }, projectId);
         setError("Er ging iets mis met de verbinding.");
       } finally {
         setBusy(false);
       }
     },
-    [projectId, router, state.activeStepId, payload, ask],
+    [projectId, router, state.activeStepId, viewingStepId, payload, ask],
   );
 
   const viewing = state.steps.find((s) => s.id === viewingStepId) ?? state.steps[0];

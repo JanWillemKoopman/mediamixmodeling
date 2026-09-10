@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { AlertCircle, RotateCcw } from "lucide-react";
+import { logError } from "@/lib/log/client";
 
 // Route-segment error boundary: een onverwachte render- of datafout in eender welke
 // pagina eindigt hier — in een nette melding met herstelknop — in plaats van in een
@@ -9,6 +10,10 @@ import { AlertCircle, RotateCcw } from "lucide-react";
 export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     console.error("[boundary]", error);
+    // De digest is het enige dat de gebruiker ziet én het enige dat deze fout koppelt aan de
+    // serverkant ervan in Vercel; zonder die regel in het logboek is een screenshot van dit
+    // scherm niet terug te zoeken.
+    logError("render.crash", error, { digest: error.digest ?? null });
   }, [error]);
 
   return (

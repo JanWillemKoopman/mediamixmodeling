@@ -38,7 +38,7 @@ export default async function ProjectFlow({ params }: { params: { id: string } }
 
   return (
     <>
-      <TopBar email={viewer.email} guideMarkdown={getHandleidingMarkdown()} />
+      <TopBar email={viewer.email} guideMarkdown={getHandleidingMarkdown()} logboek />
       <div className="mx-auto max-w-[1400px] px-4 pt-4 sm:px-6">
         <Link href="/projects" className="text-sm text-fg-muted transition hover:text-fg">
           ← Projecten
