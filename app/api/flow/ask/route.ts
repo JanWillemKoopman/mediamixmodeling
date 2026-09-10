@@ -87,11 +87,19 @@ async function handlePost(request: Request) {
   }
 
   const channels = snapshot.approvedDataset ? channelsOf(snapshot.approvedDataset).map((c) => c.name) : [];
+  // Het breekpunt staat op het LAATSTE systeemblok, niet op de stabiele kern ervoor.
+  //
+  // Dat is geen smaakkwestie: een prefix onder het minimum van het model wordt stilzwijgend
+  // niet gecachet — geen foutmelding, alleen `cache_creation_input_tokens: 0`. GUIDE_SYSTEM is
+  // ~700 tokens en het minimum van Sonnet 5 is 1024, dus een breekpunt daar deed letterlijk
+  // niets. Systeem + briefing samen komen er ruim boven, en binnen één stap is die combinatie
+  // stabiel over opeenvolgende vragen — precies het geval dat hergebruik oplevert.
+  //
+  // De gespreksgeschiedenis staat ná het breekpunt: die groeit elke beurt en zou de prefix
+  // anders bij elke vraag opnieuw ongeldig maken.
   const system: Anthropic.TextBlockParam[] = [
-    // De stabiele kern eerst, met een cache-breekpunt: byte-identiek bij elke aanvraag van elk
-    // project, dus de ideale prefix om te hergebruiken.
-    { type: "text", text: GUIDE_SYSTEM, cache_control: { type: "ephemeral" } },
-    { type: "text", text: briefing(snapshot, state, viewing) },
+    { type: "text", text: GUIDE_SYSTEM },
+    { type: "text", text: briefing(snapshot, state, viewing), cache_control: { type: "ephemeral" } },
   ];
 
   const client = new Anthropic({ apiKey });
@@ -114,7 +122,10 @@ async function handlePost(request: Request) {
       try {
         const runner = client.messages.stream({
           model: GUIDE_MODEL,
-          max_tokens: 1500,
+          // Ruim, niet krap: het denkwerk van het model telt mee in deze limiet, en er wordt
+          // alleen afgerekend op wat er werkelijk gegenereerd wordt. Met 1500 werd een wat
+          // langer antwoord halverwege afgekapt zonder dat er iets over de fout te zien was.
+          max_tokens: 8000,
           system,
           tools: channels.length > 0 ? [proposeBeliefsTool(channels)] : [],
           messages: [...turns, { role: "user", content: [{ type: "text", text: message }] }],
