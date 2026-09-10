@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   frontend:
-    name: Frontend (lint + typecheck + build)
+    name: Frontend (lint + typecheck + test + build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +26,10 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      # De invarianten van het traject (docs/CHAT_PIPELINE_HERZIENING.md §8.2), getoetst
+      # over elke toestand waarin een project kan verkeren — plus de controle dat elke
+      # aangeroepen API-route ook echt bestaat.
+      - run: npm test
       - run: npm run build
 
   mmm-core:

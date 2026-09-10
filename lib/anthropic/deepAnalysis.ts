@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { ARCHITECT_ANALYST_MODEL } from "@/lib/anthropic/fitContext";
+import { ANALYST_MODEL } from "@/lib/ai/guide";
 import type { FitSummary } from "@/lib/types";
 
 // Step 3 — deep-dive analysis: a distinct, explicitly-triggered action (not the chat
@@ -37,7 +37,7 @@ Regels:
 
 export function buildDeepAnalysisRequest(summary: FitSummary): Anthropic.Beta.Messages.MessageCreateParamsNonStreaming {
   return {
-    model: ARCHITECT_ANALYST_MODEL,
+    model: ANALYST_MODEL,
     // A live test against a 2-channel synthetic FitSummary already used ~8.6K output
     // tokens (5 charts + narrative) against an 8192 cap — the server-tool loop's
     // cumulative usage can exceed a single sub-turn's budget. Real fits with more

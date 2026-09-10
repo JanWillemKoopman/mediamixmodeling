@@ -1,0 +1,72 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`de begeleidende teksten > liggen vast 1`] = `
+"## 1. Waar wil je antwoord op?
+
+Welkom. We gaan samen een marketingmodel bouwen dat laat zien wat jouw kanalen opleveren. Dat doen we in acht stappen; je ziet links steeds waar je bent.
+
+Om te beginnen: waar wil je antwoord op? Dat bepaalt wat ik straks vooropzet.
+
+---
+
+## 2. Data aanleveren
+
+Nu je databestand. Eén bestand, met per week een regel.
+
+Wat erin moet staan:
+- **Een datumkolom** — één rij per week (of per dag, dan tel ik ze zelf op)
+- **Je resultaat** — omzet, orders of leads: het getal waar je op stuurt
+- **Je uitgaven per kanaal** — één kolom per kanaal
+
+Liefst minstens een jaar aan weken. Minder kan, maar dan wordt het model onzekerder, en dat zeg ik je dan ook.
+
+---
+
+## 3. Klopt wat ik zie?
+
+Ik heb je bestand gelezen en per kolom een inschatting gemaakt: wat je datum is, wat je resultaat is, en welke kolommen kanalen zijn.
+
+Loop het even na. Vooral de eenheden: een kanaal dat in bereik of vertoningen staat maar voor euro's wordt aangezien, geeft later een rendement dat nergens op slaat.
+
+---
+
+## 4. Data klaarmaken
+
+Nu maak ik je data klaar. Ik kijk naar ontbrekende weken, weken die er echt uitspringen, en kanalen die zo op elkaar lijken dat ze niet los te beoordelen zijn.
+
+Wat ik tegenkom leg ik je voor als een gewone vraag — je hoeft geen instellingen te kiezen.
+
+---
+
+## 5. Wat weet jij al?
+
+Dit is de belangrijkste stap, en hij duurt maar even.
+
+Wat jij over je markt weet, weet het model niet. Als jij zegt dat tv bij jullie wekenlang doorwerkt, hoeft het model dat niet uit de cijfers te raden — en wordt de uitkomst scherper.
+
+Je kiest geen getallen, alleen wat je verwacht. En **"weet ik niet" is een prima antwoord**: dan laat ik je data het volledig bepalen.
+
+---
+
+## 6. Controleren en rekenen
+
+Voordat ik ga rekenen, laat ik je zien wat er precies berekend wordt: je resultaat, je kanalen met hun eenheid, en wat je hebt aangegeven.
+
+De berekening zelf duurt meestal 3 à 5 minuten. Je kunt intussen gerust wegklikken — ik onthoud waar we waren.
+
+---
+
+## 7. Wat zegt het model?
+
+De berekening is klaar. Ik begin met het belangrijkste: kun je hierop sturen, of niet?
+
+Daarna wat er volgens het model gebeurd is, en pas daarna de cijfers zelf. De techniek staat eronder, ingeklapt — die hoef je niet te lezen.
+
+---
+
+## 8. Delen
+
+Klaar om te delen. De klant krijgt een eigen pagina met dit resultaat: de uitkomst en de bandbreedte eromheen, geen ruwe data en geen chat.
+
+Je kunt eerst bekijken wat hij precies te zien krijgt."
+`;

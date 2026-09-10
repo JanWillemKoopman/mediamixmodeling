@@ -14,7 +14,7 @@ Next.js (Vercel)  ──►  Supabase (Postgres + Storage + Realtime + RLS)  ◄
 
 | Map | Wat het is |
 |---|---|
-| `app/`, `components/`, `lib/` | De Next.js-bouwersapp en het klantdashboard |
+| `app/`, `components/`, `lib/` | De Next.js-bouwersapp (het achtstappentraject in `lib/flow/`) en het klantdashboard |
 | `packages/mmm-core/` | De statistische kern: ingestie, model, fit, diagnostiek, validatie, optimalisatie. Kent Supabase niet en heeft geen netwerk nodig. |
 | `worker/` | De Modal-worker: state machine, claiming, storage, foutclassificatie. Bevat geen statistiek — die leent hij van `mmm-core`. |
 | `supabase/migrations/` | Het schema. `0022_mmm_v2_schema.sql` is de huidige basis. |
@@ -87,44 +87,73 @@ calculating_results → completed | failed | cancelled`
 - **Idempotency key** per run: dezelfde configuratie + dataset tweemaal insturen levert dezelfde
   rij, geen tweede fit.
 - **Lease + heartbeat**: een run waarvan de worker omvalt, valt terug in de wachtrij in plaats van
-  eeuwig "bezig" te blijven. De wizard toont de huidige stap in mensentaal en escaleert zichtbaar
+  eeuwig "bezig" te blijven. Het traject toont de huidige stap in mensentaal en escaleert zichtbaar
   als het te lang duurt.
 - **Fouten hebben een code, een gebruikersboodschap en een technische tekst.** De gebruiker ziet
   nooit een traceback; de bouwer verliest hem nooit.
 - **Reproduceerbaarheid**: seed, pakketversies en de hash van de opgeloste specificatie staan bij
   de run.
 
-## 4. Waar de AI wél en niet mag komen
+## 4. Het traject dat de gebruiker doorloopt
 
-De AI **mag**: uitleggen, vragen stellen, metadata interpreteren, een kolomrol voorstellen, een
-recept voorstellen, een *intentie* voorstellen, resultaten in gewone taal samenvatten en
-afwijkingen signaleren.
+`app/projects/[id]` is een vaste reeks van **acht stappen** (`lib/flow/`), niet een gesprek dat
+toevallig vooruit gaat. Het waarom staat in
+[`CHAT_PIPELINE_HERZIENING.md`](./CHAT_PIPELINE_HERZIENING.md); dit is de stand.
 
-De AI **mag niet**: modelcode genereren die wordt uitgevoerd, priors als getal zetten,
-modelparameters wijzigen zonder validatie, een model goed verklaren, onzekerheid verbergen of
-resultaten verzinnen.
+| Onderdeel | Wat het is |
+|---|---|
+| `lib/flow/steps.ts` | De acht stappen. Elke stap declareert zijn eigen acties, en de knoppen én de AI-briefing worden daaruit gerenderd. Een knop die niet bestaat, kan daardoor nergens opduiken. |
+| `lib/flow/state.ts` | De toestand: per stap afgerond / achterhaald / aan de beurt / geblokkeerd / wachtend. Afgeleid uit de feiten plus het grootboek — nooit uit een positie in een lijst. |
+| `mmm.project_steps` | Het grootboek: wat de gebruiker heeft besloten en wanneer. Zonder `status`-kolom en zonder `stale`-vlag; beide worden afgeleid, want een tweede waarheid loopt uit de pas. |
+| `mmm.chat_messages` | Het transcript, stap-verankerd. Server-side gerenderd, dus een refresh verliest niets. |
+| `app/api/flow` | De enige plek waar het traject vooruit gaat. Toetst elke actie tegen de acties die de huidige toestand daadwerkelijk aanbiedt. |
+
+Zes invarianten gelden over **alle** toestanden die de flow kan aannemen, getoetst in
+`lib/flow/__tests__`: nooit een doodlopende toestand; de getoonde stap volgt uit de feiten; geen
+getal zonder zijn oordeel; elke fout heeft mensentaal én een uitweg; onomkeerbaar betekent
+bevestigd (met uitleg waarvoor); elke stap is af te ronden zonder te typen.
+
+## 5. Waar de AI wél en niet mag komen
+
+De AI **mag**: uitleggen, vragen beantwoorden, een kolomrol voorstellen, een *verwachting per
+kanaal* voorstellen, de data grondig nakijken, en een uitkomst in gewone taal samenvatten.
+
+De AI **mag niet**: modelcode genereren die wordt uitgevoerd, priors als getal zetten, een model
+goed verklaren, onzekerheid verbergen, of een getal noemen dat niet uit de berekening komt.
 
 Hoe dat wordt afgedwongen, niet alleen afgesproken:
 
-- Het enige modelgereedschap dat Claude heeft is `propose_model_intent`, en dat accepteert
-  **uitsluitend enums** — geen enkel numeriek veld.
-- Elk voorstel is een *voorstel*: `/api/fit-refine` geeft `{status: "proposed", …}` terug en
-  schrijft niets. Er is geen route waarlangs LLM-tekst een run start.
+- Het enige gereedschap dat de gids heeft is `propose_beliefs`, en het schema daarvan wordt
+  **gegenereerd uit dezelfde vraaglijsten die de kaart rendert** (`lib/flow/beliefs.ts`). Er is
+  geen numeriek veld om in te vullen, en geen waarde die de kaart niet kent.
+- Elk voorstel is een *voorstel*: het vult de kaart zichtbaar in; de gebruiker past aan en
+  bevestigt zelf. `/api/flow/ask` schrijft niets naar het grootboek en start niets.
+- De briefing die de gids krijgt wordt gegenereerd uit de flow — welke stap, welke knoppen,
+  welke feiten. Dat sluit prompt-drift uit: de vorige prompt beschreef knoppen en velden die
+  niet meer bestonden en sprak zichzelf tegen.
+- **Elk getal in de uitkomst komt uit code** (`lib/flow/outcome.ts`). De gids schrijft de
+  duiding eromheen, en `lib/ai/numberCheck.ts` toetst achteraf of elk getal in die tekst
+  herleidbaar is tot de `FitSummary`; zo niet, dan wordt de tekst niet bewaard.
 - De worker leest de intentie opnieuw en leidt de priors zelf af; hij vertrouwt niets wat de
   client meestuurt. `_PRIOR_BOUNDS` in `jobspec.py` is de laatste verdedigingslinie.
 - Een ROAS-kalibratie op basis van een experiment vereist een `confirmed_by` — een mens.
 - De klantsamenvatting wordt geweigerd zolang het oordeel onder `statistically_valid` ligt.
 
-## 5. Testen
+## 6. Testen
 
 ```bash
-npm run lint && npm run typecheck && npm run build   # frontend
+npm run lint && npm run typecheck && npm test && npm run build   # frontend
 pytest packages/mmm-core                             # snelle kern (geen sampler)
 pytest packages/mmm-core -m slow                     # echte NUTS-fit: herstelmatrix
 pytest worker/tests                                  # levenscyclus zonder database
 ```
 
-De trage suite is een **herstelmatrix**: synthetische data met bekende waarheid (basis,
+De frontend-suite (vitest) toetst de zes invarianten van het traject over alle bereikbare
+toestanden, loopt de hele weg af op de meegeleverde demo-CSV, legt de begeleidende teksten vast
+in een snapshot, en controleert dat elke aangeroepen API-route ook echt bestaat — dat laatste
+vond een aanroep die jarenlang faalde zonder dat iets klaagde.
+
+De trage Python-suite is een **herstelmatrix**: synthetische data met bekende waarheid (basis,
 onverzadigd, seizoensverwarring, collineair, telling-KPI, GRP-uitsluiting) gaat door de
 *productieweg* — `measure_dataset` → `build_model_config` → fit — en de test controleert of het
 model de waarheid terugvindt én of het bij collineaire kanalen zélf zegt dat het ze niet kan
