@@ -300,6 +300,12 @@ export function FlowShell({
       } catch (err) {
         logError("flow.actie.verbinding", err, { actie: action.id, stap: viewingStepId }, projectId);
         setError("Er ging iets mis met de verbinding.");
+        // De handeling zelf gaat meestal gewoon door op de server (een berekening van
+        // minuten laat een mobiele fetch soms "Load failed" geven na het loskoppelen en
+        // hervatten van het scherm, terwijl de server allang klaar is). Zonder deze refresh
+        // bleef de gebruiker naar een verouderd scherm met een foutmelding kijken, ook nadat
+        // de berekening allang was afgerond — precies zo'n geval bracht dit aan het licht.
+        router.refresh();
       } finally {
         setBusy(false);
       }
