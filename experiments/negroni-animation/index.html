@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Negroni Recipe Animation</title>
+<style>
+  /* Google Fonts (OFL), vendored so headless export renders identically offline */
+  @font-face { font-family: "Luckiest Guy"; src: url(fonts/LuckiestGuy-latin.woff2) format("woff2"); font-display: block; }
+  @font-face { font-family: "Patrick Hand"; src: url(fonts/PatrickHand-latin.woff2) format("woff2"); font-display: block; }
+  :root { --bg: #efeae0; --ink: #2e2a2a; --accent: #e07b7a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Patrick Hand", system-ui, sans-serif;
+         display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px; min-height: 100vh; }
+  canvas { width: min(100%, 78vh); height: auto; aspect-ratio: 1; background: #fdfbf6; border-radius: 10px;
+           box-shadow: 0 6px 24px rgba(0,0,0,.12); }
+  #ui { display: flex; align-items: center; gap: 12px; width: min(100%, 78vh); font-size: 20px; }
+  #ui button { font: inherit; border: 2px solid var(--ink); background: #fff; border-radius: 8px; padding: 4px 14px; cursor: pointer; }
+  #ui input { flex: 1; accent-color: var(--accent); }
+  #time { font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+  body.export { padding: 0; gap: 0; background: #fdfbf6; }
+  body.export canvas { width: 1080px; height: 1080px; border-radius: 0; box-shadow: none; }
+  body.export #ui { display: none; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1080"></canvas>
+<div id="ui">
+  <button id="play">Pause</button>
+  <input id="scrub" type="range" min="0" max="30" step="0.001" value="0">
+  <span id="time">0.00s</span>
+</div>
+<script>
+// ---------------------------------------------------------------------------
+// Negroni — 30 s recipe motion graphic.
+// Every frame is a pure function of time: render(t) draws the full scene for
+// t in [0, DURATION]. The same file serves the live preview and the export.
+// ---------------------------------------------------------------------------
+const W = 1080, H = 1080, FPS = 30, DURATION = 30;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+const COL = {
+  paper: '#fdfbf6', ink: '#2e2a2a', inkSoft: '#6b6360',
+  title: '#e07b7a', titleSide: '#b8504f',
+  glassFill: 'rgba(214,232,242,0.55)', glassBase: 'rgba(188,214,228,0.65)',
+  ice: '#eef6fa', iceTop: '#ffffff', iceSide: '#d3e4ee',
+  orange: '#f4a93b', orangeDark: '#c9761c',
+  highlight: 'rgba(224,123,122,0.28)',
+};
+
+// Timeline (seconds)
+const T = { list: 3.5, ice: 6, gin: 9, camp: 13.5, verm: 18, stir: 22.5, garn: 26, out: 28 };
+
+// ---------- math helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const easeInOut = k => k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const easeOut = k => 1 - Math.pow(1 - k, 3);
+const easeIn = k => k * k * k;
+const easeOutBack = k => { const c1 = 1.9, c3 = c1 + 1; return k <= 0 ? 0 : 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
+const easeOutBounce = k => {
+  const n = 7.5625, d = 2.75;
+  if (k < 1 / d) return n * k * k;
+  if (k < 2 / d) return n * (k -= 1.5 / d) * k + 0.75;
+  if (k < 2.5 / d) return n * (k -= 2.25 / d) * k + 0.9375;
+  return n * (k -= 2.625 / d) * k + 0.984375;
+};
+const lerpRGBA = (a, b, k) => a.map((v, i) => lerp(v, b[i], k));
+const rgba = c => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${c[3].toFixed(3)})`;
+
+// ---------- hand-drawn line helpers ----------
+// BOIL changes 8x per second so the ink "breathes" like a hand-drawn cartoon.
+let BOIL = 0;
+const h1 = x => { const s = Math.sin(x * 127.1 + BOIL * 311.7) * 43758.5453; return s - Math.floor(s); };
+
+function linePts(x1, y1, x2, y2, n) {
+  n = n || Math.max(2, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 8));
+  const p = [];
+  for (let i = 0; i <= n; i++) p.push([lerp(x1, x2, i / n), lerp(y1, y2, i / n)]);
+  return p;
+}
+function ellipsePts(cx, cy, rx, ry, a0 = 0, a1 = Math.PI * 2, n) {
+  n = n || Math.max(8, Math.ceil(Math.abs(a1 - a0) * Math.max(rx, ry) / 8));
+  const p = [];
+  for (let i = 0; i <= n; i++) { const a = lerp(a0, a1, i / n); p.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a)]); }
+  return p;
+}
+function wobble(pts, amp, seed) {
+  const p1 = h1(seed) * 6.283, p2 = h1(seed + 1.7) * 6.283;
+  return pts.map(([x, y], i) => [x + amp * Math.sin(i * 0.37 + p1), y + amp * Math.cos(i * 0.29 + p2)]);
+}
+function strokePts(pts, color, width, progress = 1) {
+  const n = Math.floor((pts.length - 1) * clamp(progress));
+  if (n < 1) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i <= n; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+// Two slightly offset passes = sketchy pencil look.
+function sketch(pts, { color = COL.ink, width = 2.4, progress = 1, amp = 1.1, seed = 1 } = {}) {
+  strokePts(wobble(pts, amp, seed), color, width, progress);
+  ctx.globalAlpha *= 0.55;
+  strokePts(wobble(pts, amp * 1.3, seed + 9), color, width * 0.6, progress);
+  ctx.globalAlpha /= 0.55;
+}
+function fillPts(pts, color) {
+  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+  for (const [x, y] of pts) ctx.lineTo(x, y);
+  ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+}
+function roundRectPts(x, y, w, h, r) {
+  return [
+    ...linePts(x + r, y, x + w - r, y), ...ellipsePts(x + w - r, y + r, r, r, -Math.PI / 2, 0, 6),
+    ...linePts(x + w, y + r, x + w, y + h - r), ...ellipsePts(x + w - r, y + h - r, r, r, 0, Math.PI / 2, 6),
+    ...linePts(x + w - r, y + h, x + r, y + h), ...ellipsePts(x + r, y + h - r, r, r, Math.PI / 2, Math.PI, 6),
+    ...linePts(x, y + h - r, x, y + r), ...ellipsePts(x + r, y + r, r, r, Math.PI, Math.PI * 1.5, 6),
+  ];
+}
+
+// ---------- text helpers ----------
+const FONT_TITLE = '"Luckiest Guy", Impact, sans-serif';
+const FONT_HAND = '"Patrick Hand", "Comic Sans MS", sans-serif';
+
+function extrudedText(str, x, y, size, { fill = COL.title, side = COL.titleSide, depth = 9, align = 'center', outline = 4 } = {}) {
+  ctx.save();
+  ctx.font = `${size}px ${FONT_TITLE}`;
+  ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  const by = y + size * 0.36;
+  const d = depth * size / 150;
+  ctx.lineJoin = 'round';
+  ctx.fillStyle = side;
+  for (let k = d; k >= 1; k -= 0.75) ctx.fillText(str, x + k * 0.8, by + k * 0.6);
+  ctx.strokeStyle = COL.ink; ctx.lineWidth = outline * size / 150 + 0.8;
+  ctx.strokeText(str, x + d * 0.8, by + d * 0.6);
+  ctx.fillStyle = fill; ctx.fillText(str, x, by);
+  ctx.strokeText(str, x, by);
+  ctx.restore();
+}
+function handText(str, x, y, size, { color = COL.ink, align = 'left', alpha = 1 } = {}) {
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.font = `${size}px ${FONT_HAND}`;
+  ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.fillStyle = color; ctx.fillText(str, x, y);
+  ctx.restore();
+}
+
+// ---------- glass geometry ----------
+const G = { cx: 540, rimY: 585, rimRx: 180, rimRy: 26, baseY: 900, baseRx: 150, baseRy: 20, thick: 32 };
+G.innerBottom = G.baseY - G.thick;
+const FULL_H = 222;                       // px of liquid for 90 ml
+const outerRx = y => lerp(G.rimRx, G.baseRx, (y - G.rimY) / (G.baseY - G.rimY));
+const innerRx = y => outerRx(y) - 8;
+const levelY = ml => G.innerBottom - FULL_H * ml / 90;
+
+// ---------- recipe state as a function of time ----------
+const POUR = { in: 0.7, tilt: 1.3, flowEnd: 3.4, untilt: 3.9, out: 4.5, fall: 0.16 };
+function pourVolume(t, start) { return 30 * easeInOut(seg(t - start, POUR.tilt + POUR.fall, POUR.flowEnd)); }
+function volumes(t) {
+  return { gin: pourVolume(t, T.gin), camp: pourVolume(t, T.camp), verm: pourVolume(t, T.verm) };
+}
+const LIQ = {
+  gin: [200, 226, 234, 0.42], mid: [205, 44, 62, 0.93], fin: [139, 27, 42, 0.97],
+};
+function liquidColor(v) {
+  let c = LIQ.gin;
+  if (v.camp > 0) c = lerpRGBA(LIQ.gin, LIQ.mid, easeOut(v.camp / 30));
+  if (v.verm > 0) c = lerpRGBA(LIQ.mid, LIQ.fin, easeOut(v.verm / 30));
+  return c;
+}
+
+// ---------- scene pieces ----------
+function drawPaper() {
+  ctx.fillStyle = COL.paper; ctx.fillRect(0, 0, W, H);
+  // faint paper speckle, static (not boiling)
+  ctx.fillStyle = 'rgba(120,100,80,0.035)';
+  for (let i = 0; i < 260; i++) {
+    const s = Math.sin(i * 91.7) * 43758.5453, r = s - Math.floor(s);
+    const s2 = Math.sin(i * 12.9 + 4) * 24634.6345, r2 = s2 - Math.floor(s2);
+    ctx.fillRect(r * W, r2 * H, 2, 2);
+  }
+}
+
+function drawTitle(t) {
+  const shrink = easeInOut(seg(t, 3.0, 3.8));
+  const scale = lerp(1, 0.5, shrink);
+  const cy = lerp(300, 100, shrink);
+  const size = 150, gap = 10;
+  ctx.save();
+  ctx.font = `${size}px ${FONT_TITLE}`;
+  const letters = 'NEGRONI'.split('');
+  const widths = letters.map(l => ctx.measureText(l).width);
+  const total = widths.reduce((a, b) => a + b, 0) + gap * (letters.length - 1);
+  ctx.translate(540, cy); ctx.scale(scale, scale);
+  let x = -total / 2;
+  letters.forEach((l, i) => {
+    const p = easeOutBack(seg(t, 0.15 + i * 0.11, 0.6 + i * 0.11));
+    const bob = Math.sin(t * 2.2 + i * 0.9) * 3 * (1 - shrink * 0.6);
+    if (p > 0) {
+      ctx.save();
+      ctx.translate(x + widths[i] / 2, bob);
+      ctx.rotate((i % 2 ? 1 : -1) * 0.045);
+      ctx.scale(p, p);
+      extrudedText(l, 0, 0, size);
+      ctx.restore();
+    }
+    x += widths[i] + gap;
+  });
+  ctx.restore();
+
+  // intro subtitle
+  const a = seg(t, 1.2, 1.7) * (1 - seg(t, 2.9, 3.3));
+  if (a > 0) handText('the classic  1 : 1 : 1  —  in 30 seconds', 540, 440 + (1 - easeOut(seg(t, 1.2, 1.7))) * 16, 50, { align: 'center', alpha: a, color: COL.inkSoft });
+}
+
+const LIST = [
+  { label: 'Ice cubes', active: [T.ice, T.gin], done: T.ice + 2.2 },
+  { label: '30 ml gin', active: [T.gin, T.camp], done: T.gin + 3.6 },
+  { label: '30 ml Campari', active: [T.camp, T.verm], done: T.camp + 3.6 },
+  { label: '30 ml sweet vermouth', active: [T.verm, T.stir], done: T.verm + 3.6 },
+  { label: 'Orange peel', active: [T.garn, T.out], done: T.garn + 1.3 },
+];
+function drawChecklist(t) {
+  const fade = 1 - seg(t, T.out, T.out + 0.5);
+  if (t < T.list || fade <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = fade;
+  const x0 = 56, y0 = 300;
+  const hp = easeOut(seg(t, T.list, T.list + 0.5));
+  ctx.globalAlpha = fade * hp;
+  extrudedText("YOU'LL NEED", x0 + (1 - hp) * -30, y0, 36, { align: 'left', depth: 6, outline: 7 });
+  LIST.forEach((it, i) => {
+    const p = easeOut(seg(t, T.list + 0.35 + i * 0.25, T.list + 0.85 + i * 0.25));
+    if (p <= 0) return;
+    const y = y0 + 72 + i * 60, x = x0 + (1 - p) * -40;
+    ctx.globalAlpha = fade * p;
+    // highlighter swipe while active
+    const act = seg(t, it.active[0], it.active[0] + 0.4) * (1 - seg(t, it.active[1] - 0.2, it.active[1]));
+    if (act > 0) {
+      ctx.save();
+      ctx.font = `34px ${FONT_HAND}`;
+      const w = ctx.measureText(it.label).width + 16;
+      ctx.fillStyle = COL.highlight;
+      ctx.beginPath();
+      ctx.moveTo(x + 44, y - 16); ctx.lineTo(x + 44 + w * easeOut(act), y - 19);
+      ctx.lineTo(x + 44 + w * easeOut(act), y + 17); ctx.lineTo(x + 44, y + 15); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    sketch(roundRectPts(x, y - 16, 30, 30, 5), { width: 2.2, seed: 40 + i });
+    const d = seg(t, it.done, it.done + 0.35);
+    if (d > 0) {
+      const tick = [...linePts(x + 5, y, x + 13, y + 10, 4), ...linePts(x + 13, y + 10, x + 34, y - 20, 8)];
+      sketch(tick, { color: '#c0392b', width: 4.5, progress: d, seed: 60 + i });
+    }
+    handText(it.label, x + 52, y + 1, 34, { color: d >= 1 ? COL.inkSoft : COL.ink });
+    if (d > 0) sketch(linePts(x + 50, y + 2, x + 52 + (ctx.font = `34px ${FONT_HAND}`, ctx.measureText(it.label).width) * d, y + 1, 12), { color: 'rgba(46,42,42,0.45)', width: 2, seed: 70 + i, amp: 0.8 });
+  });
+  ctx.restore();
+}
+
+function drawLevelMarks(t, v) {
+  const a = seg(t, T.gin - 0.3, T.gin + 0.3) * (1 - seg(t, T.stir, T.stir + 0.5));
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  const total = v.gin + v.camp + v.verm;
+  [30, 60, 90].forEach((ml, i) => {
+    const y = levelY(ml);
+    const x = G.cx + outerRx(y) + 12;
+    const reached = total >= ml - 0.05;
+    const targetNow = total < ml && total > ml - 30;
+    const col = reached ? '#c0392b' : targetNow ? COL.ink : 'rgba(46,42,42,0.4)';
+    sketch(linePts(x, y, x + 26, y, 4), { color: col, width: 3, seed: 80 + i, amp: 0.6 });
+    handText(`${ml} ml`, x + 34, y + 1, 30, { color: col });
+  });
+  ctx.restore();
+}
+
+// Ice cube, drawn centred at (x, y), side s, rotated by ang.
+function cubeShape(s) {
+  const h = s / 2, d = s * 0.22;
+  return {
+    front: roundRectPts(-h, -h, s, s, 10),
+    top: [[-h + 4, -h], [-h + d, -h - d * 0.8], [h + d, -h - d * 0.8], [h - 2, -h]],
+    side: [[h, -h + 2], [h + d, -h - d * 0.8], [h + d, h - d * 0.8 - 6], [h, h - 4]],
+  };
+}
+function drawCube(x, y, s, ang, seed) {
+  const c = cubeShape(s);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  fillPts(c.side, COL.iceSide); fillPts(c.top, COL.iceTop); fillPts(c.front, COL.ice);
+  sketch([...c.side, c.side[0]], { width: 2, seed: seed + 1, amp: 0.7 });
+  sketch([...c.top, c.top[0]], { width: 2, seed: seed + 2, amp: 0.7 });
+  sketch([...c.front, c.front[0]], { width: 2.2, seed: seed + 3, amp: 0.8 });
+  // inner facet lines
+  sketch(linePts(-s * 0.1, -s * 0.5, s * 0.05, s * 0.05, 6), { color: 'rgba(90,120,140,0.45)', width: 1.4, seed: seed + 4 });
+  sketch(linePts(s * 0.05, s * 0.05, -s * 0.2, s * 0.5, 6), { color: 'rgba(90,120,140,0.45)', width: 1.4, seed: seed + 5 });
+  ctx.restore();
+}
+function cubeSilhouette(x, y, s, ang) {
+  const c = cubeShape(s);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  fillPts([...c.front], ctx.fillStyle); fillPts(c.top, ctx.fillStyle); fillPts(c.side, ctx.fillStyle);
+  ctx.restore();
+}
+
+const CUBES = [
+  { dx: -72, rest: G.innerBottom - 50, ang: -0.08, drop: T.ice + 0.3 },
+  { dx: 70, rest: G.innerBottom - 48, ang: 0.1, drop: T.ice + 0.75 },
+  { dx: -4, rest: G.innerBottom - 136, ang: 0.04, drop: T.ice + 1.2 },
+];
+const CUBE_S = 92;
+function cubeStates(t, surfaceY) {
+  // the ice pile floats as one once the liquid is high enough
+  const lift = Math.min(0, surfaceY + 34 - CUBES[2].rest);
+  const stir = seg(t, T.stir + 0.6, T.stir + 3.0);
+  const stirAmt = Math.sin(Math.PI * stir);
+  return CUBES.map((c, i) => {
+    const k = seg(t, c.drop, c.drop + 0.75);
+    if (k <= 0) return null;
+    const y = lerp(-120, c.rest, easeOutBounce(k)) + (k >= 1 ? lift : 0);
+    const ph = (t - T.stir) * 7.5 + i * 2.1;
+    return {
+      x: G.cx + c.dx + stirAmt * 14 * Math.sin(ph),
+      y: y + stirAmt * 5 * Math.cos(ph) + (lift < 0 ? Math.sin(t * 2.4 + i) * 2 : 0),
+      ang: c.ang + (1 - easeOut(k)) * (i % 2 ? 1.6 : -1.4) + stirAmt * 0.12 * Math.sin(ph * 0.7),
+      landed: c.drop + 0.75 * 0.36,
+    };
+  });
+}
+
+function glassSilhouettePath() {
+  const p = new Path2D();
+  p.moveTo(G.cx - G.rimRx, G.rimY);
+  p.lineTo(G.cx - G.baseRx, G.baseY);
+  p.ellipse(G.cx, G.baseY, G.baseRx, G.baseRy, 0, Math.PI, 0, true);
+  p.lineTo(G.cx + G.rimRx, G.rimY);
+  p.ellipse(G.cx, G.rimY, G.rimRx, G.rimRy, 0, 0, Math.PI, true);
+  p.closePath();
+  return p;
+}
+// Liquid body: walls from the surface down, closed on top by the surface ellipse.
+function liquidPath(surfaceY, frontOnly) {
+  const p = new Path2D();
+  const rs = innerRx(surfaceY), rb = innerRx(G.innerBottom);
+  const rys = rs * 0.13;
+  p.moveTo(G.cx - rs, surfaceY);
+  p.lineTo(G.cx - rb, G.innerBottom);
+  p.ellipse(G.cx, G.innerBottom, rb, 14, 0, Math.PI, 0, true);
+  p.lineTo(G.cx + rs, surfaceY);
+  if (frontOnly) p.ellipse(G.cx, surfaceY, rs, rys, 0, 0, Math.PI, false);
+  else p.ellipse(G.cx, surfaceY, rs, rys, 0, 0, Math.PI, true);
+  p.closePath();
+  return p;
+}
+
+function drawGlass(t, v, cubes, spoon) {
+  const draw = seg(t, 1.0, 2.6);
+  if (draw <= 0) return;
+  const total = v.gin + v.camp + v.verm;
+  const surfaceY = levelY(total);
+  const lc = liquidColor(v);
+
+  // soft shadow
+  ctx.save();
+  ctx.globalAlpha = 0.18 * easeOut(draw);
+  ctx.fillStyle = '#6b5a50';
+  ctx.beginPath(); ctx.ellipse(G.cx + 18, G.baseY + 16, G.baseRx + 40, 18, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+
+  // glass body tint
+  ctx.save();
+  ctx.globalAlpha = easeOut(draw);
+  ctx.fillStyle = COL.glassFill; ctx.fill(glassSilhouettePath());
+  // thick base
+  const bp = new Path2D();
+  bp.moveTo(G.cx - outerRx(G.innerBottom), G.innerBottom);
+  bp.lineTo(G.cx - G.baseRx, G.baseY);
+  bp.ellipse(G.cx, G.baseY, G.baseRx, G.baseRy, 0, Math.PI, 0, true);
+  bp.lineTo(G.cx + outerRx(G.innerBottom), G.innerBottom);
+  bp.ellipse(G.cx, G.innerBottom, outerRx(G.innerBottom), 14, 0, 0, Math.PI, false);
+  ctx.fillStyle = COL.glassBase; ctx.fill(bp);
+  ctx.restore();
+
+  // liquid
+  if (total > 0.05) {
+    ctx.fillStyle = rgba(lc); ctx.fill(liquidPath(surfaceY, false));
+    const rs = innerRx(surfaceY);
+    const top = lerpRGBA(lc, [255, 255, 255, lc[3]], 0.18);
+    ctx.fillStyle = rgba(top);
+    ctx.beginPath(); ctx.ellipse(G.cx, surfaceY, rs, rs * 0.13, 0, 0, Math.PI * 2); ctx.fill();
+    sketch(ellipsePts(G.cx, surfaceY, rs, rs * 0.13), { color: rgba(lerpRGBA(lc, [40, 10, 15, 1], 0.5)), width: 1.8, seed: 5, amp: 0.6 });
+    // stir swirl
+    const sw = seg(t, T.stir + 0.5, T.stir + 3.2);
+    if (sw > 0 && sw < 1) {
+      ctx.save(); ctx.globalAlpha = Math.sin(Math.PI * sw) * 0.8;
+      for (let k = 0; k < 3; k++) {
+        const a0 = (t - T.stir) * 7.5 + k * 2.1;
+        sketch(ellipsePts(G.cx, surfaceY, rs * (0.35 + k * 0.2), rs * 0.13 * (0.35 + k * 0.2), a0, a0 + 1.6), { color: 'rgba(255,220,220,0.9)', width: 3, seed: 90 + k, amp: 0.4 });
+      }
+      ctx.restore();
+    }
+  }
+
+  // ice + spoon inside the glass
+  cubes.forEach((c, i) => c && drawCube(c.x, c.y, CUBE_S, c.ang, 100 + i * 10));
+  if (spoon) drawSpoon(spoon);
+
+  // tint whatever is under the liquid surface
+  if (total > 0.05) {
+    ctx.save();
+    ctx.clip(liquidPath(surfaceY, true));
+    ctx.fillStyle = rgba([lc[0], lc[1], lc[2], lc[3] * 0.62]);
+    cubes.forEach(c => c && cubeSilhouette(c.x, c.y, CUBE_S, c.ang));
+    if (spoon) { ctx.globalAlpha = spoon.alpha; ctx.fillRect(spoon.x - 60, spoon.y - 60, 120, 900); }
+    ctx.restore();
+  }
+
+  // glass outlines, drawn on progressively during the intro
+  const pw = seg(draw, 0, 0.45), pb = seg(draw, 0.35, 0.7), pr = seg(draw, 0.6, 1);
+  sketch(linePts(G.cx - G.rimRx, G.rimY, G.cx - G.baseRx, G.baseY), { progress: pw, seed: 11, width: 2.8 });
+  sketch(linePts(G.cx + G.rimRx, G.rimY, G.cx + G.baseRx, G.baseY), { progress: pw, seed: 12, width: 2.8 });
+  sketch(ellipsePts(G.cx, G.baseY, G.baseRx, G.baseRy, Math.PI, 0), { progress: pb, seed: 13, width: 2.8 });
+  sketch(ellipsePts(G.cx, G.innerBottom, outerRx(G.innerBottom) - 4, 14, Math.PI, 0), { progress: pb, seed: 14, width: 1.6, color: 'rgba(46,42,42,0.55)' });
+  sketch(ellipsePts(G.cx, G.rimY, G.rimRx, G.rimRy, Math.PI, Math.PI * 3), { progress: pr, seed: 15, width: 2.8 });
+  // glass highlights
+  ctx.save(); ctx.globalAlpha = 0.85 * pr;
+  sketch(linePts(G.cx - G.rimRx + 26, G.rimY + 40, G.cx - G.baseRx + 22, G.baseY - 60), { color: '#ffffff', width: 7, seed: 16, amp: 0.8 });
+  sketch(linePts(G.cx - G.rimRx + 46, G.rimY + 60, G.cx - G.rimRx + 42, G.rimY + 120), { color: '#ffffff', width: 4, seed: 17, amp: 0.6 });
+  sketch(linePts(G.cx + G.rimRx - 30, G.rimY + 50, G.cx + G.baseRx - 26, G.baseY - 90), { color: 'rgba(255,255,255,0.7)', width: 4, seed: 18, amp: 0.6 });
+  ctx.restore();
+}
+
+// ---------- bottles ----------
+const BOTTLES = {
+  gin: { start: T.gin, fill: 'rgba(186,222,212,0.9)', label: '#ffffff', text: ['GIN'], textCol: '#2f6f62', stream: [214, 236, 242, 0.95], name: 'GIN', nameCol: '#3f8b7a' },
+  camp: { start: T.camp, fill: '#c21f36', label: '#f5efe2', text: ['CAMPARI'], textCol: '#c21f36', stream: [214, 34, 56, 1], name: 'CAMPARI', nameCol: '#c21f36' },
+  verm: { start: T.verm, fill: '#5a2219', label: '#f3e3c3', text: ['ROSSO', 'VERMOUTH'], textCol: '#7a2a1c', stream: [120, 34, 26, 1], name: 'SWEET VERMOUTH', nameCol: '#7a2a1c' },
+};
+function bottleOutline() {
+  const lip = 14, neck = 11, body = 60, neckEnd = 88, shoulderEnd = 150, bottom = 380, r = 16;
+  const right = [[lip, 0], [lip, 16], [neck, 20], [neck, neckEnd]];
+  for (let i = 1; i <= 12; i++) {
+    const k = i / 12;
+    const x = (1 - k) * (1 - k) * neck + 2 * (1 - k) * k * body + k * k * body;
+    const y = (1 - k) * (1 - k) * neckEnd + 2 * (1 - k) * k * (neckEnd + 8) + k * k * shoulderEnd;
+    right.push([x, y]);
+  }
+  right.push(...linePts(body, shoulderEnd, body, bottom - r).slice(1));
+  right.push(...ellipsePts(body - r, bottom - r, r, r, 0, Math.PI / 2, 5).slice(1));
+  const left = right.map(([x, y]) => [-x, y]).reverse();
+  return [...right, ...linePts(body - r, bottom, -body + r, bottom).slice(1, -1), ...left, [lip, 0]];
+}
+const BOTTLE_PTS = bottleOutline();
+const HOVER = { x: 935, y: 330 }, OFF = { x: 1260, y: 330 };
+function pourPose() { return { x: G.cx + 40, y: 468, a: -2.15 }; }
+function bottlePose(t, start) {
+  const u = t - start;
+  if (u < 0 || u > POUR.out) return null;
+  const P = pourPose();
+  if (u < POUR.in) { const k = easeOut(u / POUR.in); return { x: lerp(OFF.x, HOVER.x, k), y: HOVER.y, a: 0 }; }
+  if (u < POUR.tilt) { const k = easeInOut((u - POUR.in) / (POUR.tilt - POUR.in)); return { x: lerp(HOVER.x, P.x, k), y: lerp(HOVER.y, P.y, k), a: lerp(0, P.a, k) }; }
+  if (u < POUR.flowEnd) return { x: P.x + Math.sin(u * 5) * 1.5, y: P.y, a: P.a + Math.sin(u * 3.3) * 0.02 };
+  if (u < POUR.untilt) { const k = easeInOut((u - POUR.flowEnd) / (POUR.untilt - POUR.flowEnd)); return { x: lerp(P.x, HOVER.x, k), y: lerp(P.y, HOVER.y, k), a: lerp(P.a, 0, k) }; }
+  const k = easeIn((u - POUR.untilt) / (POUR.out - POUR.untilt));
+  return { x: lerp(HOVER.x, OFF.x, k), y: HOVER.y, a: 0 };
+}
+function drawBottle(pose, b, seed) {
+  ctx.save();
+  ctx.translate(pose.x, pose.y); ctx.rotate(pose.a);
+  fillPts(BOTTLE_PTS, b.fill);
+  ctx.fillStyle = b.label; ctx.fillRect(-52, 205, 104, 110);
+  sketch(roundRectPts(-52, 205, 104, 110, 4), { width: 2, seed: seed + 1, amp: 0.6 });
+  ctx.fillStyle = b.textCol; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (b.text.length === 1) { ctx.font = `${b.text[0].length > 4 ? 22 : 36}px ${FONT_TITLE}`; ctx.fillText(b.text[0], 0, 262); }
+  else { ctx.font = `26px ${FONT_TITLE}`; ctx.fillText(b.text[0], 0, 248); ctx.font = `17px ${FONT_TITLE}`; ctx.fillText(b.text[1], 0, 276); }
+  // cap ring + shine
+  ctx.fillStyle = 'rgba(46,42,42,0.85)'; ctx.fillRect(-14, 0, 28, 8);
+  ctx.globalAlpha = 0.5;
+  sketch(linePts(-40, 165, -40, 360), { color: '#ffffff', width: 6, seed: seed + 2, amp: 0.5 });
+  ctx.globalAlpha = 1;
+  sketch(BOTTLE_PTS, { width: 2.6, seed: seed + 3, amp: 0.9 });
+  ctx.restore();
+}
+function drawStream(t, b, surfaceY) {
+  const u = t - b.start;
+  if (u < POUR.tilt || u > POUR.flowEnd + POUR.fall + 0.05) return;
+  const P = pourPose();
+  const len = surfaceY - P.y;
+  const yBot = P.y + len * seg(u, POUR.tilt, POUR.tilt + POUR.fall);
+  const yTop = P.y + len * seg(u, POUR.flowEnd, POUR.flowEnd + POUR.fall);
+  if (yBot - yTop < 2) return;
+  const pts = [];
+  for (let y = yTop; y <= yBot; y += 6) {
+    const k = (y - P.y) / len;
+    pts.push([P.x - 4 - 10 * k * k + Math.sin(y * 0.06 - t * 25) * 1.3, y]);
+  }
+  pts.push([P.x - 14, yBot]);
+  strokePts(pts, 'rgba(46,42,42,0.75)', 12);
+  strokePts(pts, rgba(b.stream), 8.5);
+  // splash at impact
+  if (u > POUR.tilt + POUR.fall && u < POUR.flowEnd + POUR.fall) {
+    const rs = innerRx(surfaceY);
+    for (let k = 0; k < 2; k++) {
+      const ph = ((t * 2.6 + k * 0.5) % 1);
+      ctx.save(); ctx.globalAlpha = (1 - ph) * 0.8;
+      sketch(ellipsePts(P.x - 14, surfaceY, 12 + ph * 46, (12 + ph * 46) * 0.14 * (rs / 150) + 2), { color: 'rgba(255,255,255,0.95)', width: 2.2, seed: 120 + k, amp: 0.3 });
+      ctx.restore();
+    }
+    for (let k = 0; k < 4; k++) {
+      const ph = ((t * 3 + k * 0.27) % 1);
+      const dx = (k % 2 ? 1 : -1) * (8 + k * 6) * ph, dy = -34 * ph * (1 - ph) * 4 * 0.5;
+      ctx.fillStyle = rgba(b.stream);
+      ctx.beginPath(); ctx.arc(P.x - 14 + dx, surfaceY - 4 + dy, 3.4 * (1 - ph) + 1, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+// ---------- bar spoon ----------
+function spoonState(t, surfaceY) {
+  const u = t - T.stir;
+  if (u < 0 || u > 3.5) return null;
+  const enter = easeOut(seg(u, 0, 0.6)), exit = easeIn(seg(u, 3.0, 3.5));
+  const circ = seg(u, 0.5, 3.1);
+  const ang = circ * Math.PI * 2 * 3;
+  const r = 52 * Math.sin(Math.PI * clamp(circ * 1.4));
+  const tipY = surfaceY + 150;
+  return {
+    x: G.cx + r * Math.cos(ang), y: tipY - (1 - enter) * 160 - exit * 160,
+    tx: G.cx + 70 + r * 0.4 * Math.cos(ang), ty: tipY - 520 - (1 - enter) * 160 - exit * 160,
+    alpha: enter * (1 - exit),
+  };
+}
+function drawSpoon(s) {
+  ctx.save(); ctx.globalAlpha *= s.alpha;
+  const pts = linePts(s.x, s.y, s.tx, s.ty, 40);
+  sketch(pts, { width: 7, color: '#8d9399', seed: 140, amp: 0.4 });
+  // twisted shaft
+  const tw = [];
+  for (let i = 8; i <= 34; i++) {
+    const [x, y] = pts[i]; tw.push([x + (i % 2 ? 4 : -4), y]);
+  }
+  sketch(tw, { width: 1.4, color: COL.ink, seed: 141, amp: 0.2 });
+  sketch(pts, { width: 1.6, color: COL.ink, seed: 142, amp: 0.4 });
+  ctx.fillStyle = '#b5bbc0';
+  ctx.beginPath(); ctx.ellipse(s.x, s.y + 8, 11, 17, -0.1, 0, Math.PI * 2); ctx.fill();
+  sketch(ellipsePts(s.x, s.y + 8, 11, 17), { width: 2, seed: 143, amp: 0.4 });
+  ctx.fillStyle = '#8d9399';
+  ctx.beginPath(); ctx.arc(s.tx, s.ty, 10, 0, Math.PI * 2); ctx.fill();
+  sketch(ellipsePts(s.tx, s.ty, 10, 10), { width: 2, seed: 144, amp: 0.3 });
+  ctx.restore();
+}
+
+// ---------- orange peel ----------
+function drawGarnish(t) {
+  const u = t - T.garn;
+  if (u < 0) return;
+  const drop = easeOutBounce(seg(u, 0.15, 0.85));
+  const reveal = easeInOut(seg(u, 0, 0.75));
+  const ox = G.cx + 68, oy = G.rimY - 12 - (1 - drop) * 260;
+  const pts = [];
+  const N = 90, turns = 2.6;
+  for (let i = 0; i <= N; i++) {
+    const s = i / N, th = s * turns * Math.PI * 2;
+    pts.push([ox + 118 * s + 30 * Math.sin(th), oy - 12 - 30 * Math.cos(th) + 34 * s * s]);
+  }
+  sketch(pts, { color: COL.orangeDark, width: 17, progress: reveal, seed: 150, amp: 0.5 });
+  strokePts(wobble(pts, 0.4, 151), COL.orange, 11, reveal);
+  // pith line + zest dots
+  strokePts(wobble(pts, 0.4, 152), 'rgba(255,226,160,0.8)', 3, reveal);
+  ctx.fillStyle = COL.orangeDark;
+  for (let i = 3; i < Math.floor(N * reveal); i += 7) ctx.fillRect(pts[i][0] - 1, pts[i][1] + 2, 2.4, 2.4);
+  // citrus oil spray
+  const sp = seg(u, 0.8, 1.6);
+  if (sp > 0 && sp < 1) {
+    ctx.save(); ctx.globalAlpha = 1 - sp;
+    for (let k = 0; k < 9; k++) {
+      const a = -Math.PI / 2 + (k - 4) * 0.28, r = 40 + sp * 90;
+      ctx.fillStyle = k % 2 ? COL.orange : '#ffd27a';
+      ctx.beginPath(); ctx.arc(ox + 60 + Math.cos(a) * r, oy - 40 + Math.sin(a) * r, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+// ---------- measurement / timer badge ----------
+function drawCounter(t, v) {
+  let info = null;
+  for (const [key, b] of Object.entries(BOTTLES)) {
+    const u = t - b.start;
+    if (u >= 0.4 && u <= POUR.out) info = { name: b.name, col: b.nameCol, val: `${Math.round(v[key])} ml`, sub: '(1 oz)', u, len: POUR.out - 0.4 };
+  }
+  const su = t - T.stir;
+  if (su >= 0.4 && su <= 3.4) info = { name: 'STIR', col: COL.titleSide, val: `${Math.round(30 * seg(su, 0.6, 3.0))} s`, sub: 'until well chilled', u: su + 0.4, len: 3.0 };
+  if (!info) return;
+  const k = seg(info.u - 0.4, 0, 0.35) * (1 - seg(info.u - 0.4, info.len - 0.35, info.len));
+  if (k <= 0) return;
+  ctx.save();
+  ctx.translate(196, 810); ctx.rotate(-0.04);
+  const s = easeOutBack(k); ctx.scale(s, s); ctx.globalAlpha = clamp(k * 2);
+  fillPts(roundRectPts(-140, -84, 280, 176, 20), '#ffffff');
+  sketch(roundRectPts(-140, -84, 280, 176, 20), { width: 3, seed: 160 });
+  const nameSize = info.name.length > 10 ? 30 : 40;
+  extrudedText(info.name, 0, -46, nameSize, { fill: info.col, side: COL.ink, depth: 4, outline: 7 });
+  extrudedText(info.val, 0, 18, 70, { fill: COL.title, depth: 6, outline: 6 });
+  handText(info.sub, 0, 70, 28, { align: 'center', color: COL.inkSoft });
+  ctx.restore();
+}
+
+// ---------- captions + progress ----------
+const CAPTIONS = [
+  { a: T.list, b: T.ice, step: null, text: 'Three bottles. Equal parts. One glass.' },
+  { a: T.ice, b: T.gin, step: 1, text: 'Fill a rocks glass with ice' },
+  { a: T.gin, b: T.camp, step: 2, text: 'Pour 30 ml (1 oz) gin' },
+  { a: T.camp, b: T.verm, step: 3, text: 'Add 30 ml (1 oz) Campari' },
+  { a: T.verm, b: T.stir, step: 4, text: 'Add 30 ml (1 oz) sweet vermouth' },
+  { a: T.stir, b: T.garn, step: 5, text: 'Stir 20–30 seconds' },
+  { a: T.garn, b: T.out, step: 6, text: 'Garnish with an orange peel' },
+  { a: T.out + 0.3, b: DURATION + 1, step: null, text: 'Gin  ·  Campari  ·  Sweet vermouth  —  1 : 1 : 1' },
+];
+function drawCaptions(t) {
+  const y = 1000;
+  for (const c of CAPTIONS) {
+    const k = seg(t, c.a, c.a + 0.35) * (1 - seg(t, c.b - 0.3, c.b));
+    if (k <= 0) continue;
+    ctx.save();
+    ctx.globalAlpha = k;
+    const dy = (1 - easeOut(seg(t, c.a, c.a + 0.35))) * 18;
+    ctx.font = `44px ${FONT_HAND}`;
+    const tw = ctx.measureText(c.text).width;
+    const bw = c.step ? 150 : 0, gap = c.step ? 20 : 0;
+    const x0 = 540 - (tw + bw + gap) / 2;
+    if (c.step) {
+      fillPts(roundRectPts(x0, y - 27 + dy, bw, 52, 12), COL.title);
+      sketch(roundRectPts(x0, y - 27 + dy, bw, 52, 12), { width: 2.6, seed: 170 + c.step });
+      ctx.font = `32px ${FONT_TITLE}`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 4; ctx.strokeStyle = COL.ink; ctx.lineJoin = 'round';
+      ctx.strokeText(`STEP ${c.step}`, x0 + bw / 2, y + 3 + dy); ctx.fillText(`STEP ${c.step}`, x0 + bw / 2, y + 3 + dy);
+    }
+    handText(c.text, x0 + bw + gap, y + dy, 44);
+    ctx.restore();
+  }
+  // progress bar
+  const x0 = 140, x1 = 940, py = 1058;
+  ctx.save();
+  ctx.globalAlpha = seg(t, T.list, T.list + 0.5);
+  if (ctx.globalAlpha > 0) {
+    ctx.fillStyle = 'rgba(46,42,42,0.12)'; ctx.fillRect(x0, py - 2, x1 - x0, 4);
+    ctx.fillStyle = COL.title; ctx.fillRect(x0, py - 2, (x1 - x0) * t / DURATION, 4);
+    [T.ice, T.gin, T.camp, T.verm, T.stir, T.garn].forEach(s => {
+      const x = lerp(x0, x1, s / DURATION);
+      ctx.fillStyle = t >= s ? COL.title : '#d8d2cc';
+      ctx.beginPath(); ctx.arc(x, py, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = COL.ink; ctx.stroke();
+    });
+  }
+  ctx.restore();
+}
+
+function drawClinks(t, cubes) {
+  cubes.forEach((c, i) => {
+    if (!c) return;
+    const k = seg(t, c.landed, c.landed + 0.35);
+    if (k <= 0 || k >= 1) return;
+    ctx.save(); ctx.globalAlpha = 1 - k;
+    for (let j = 0; j < 3; j++) {
+      const a = -Math.PI / 2 + (j - 1) * 0.6 + (i % 2 ? 0.3 : -0.3);
+      const r0 = 58 + k * 22, r1 = r0 + 18;
+      sketch(linePts(c.x + Math.cos(a) * r0, c.y + Math.sin(a) * r0, c.x + Math.cos(a) * r1, c.y + Math.sin(a) * r1, 3), { width: 3, seed: 180 + j, amp: 0.3 });
+    }
+    ctx.restore();
+  });
+}
+
+function drawOutro(t) {
+  const k = seg(t, T.out, T.out + 0.6);
+  if (k <= 0) return;
+  ctx.save();
+  ctx.translate(540, 330);
+  ctx.rotate(-0.05 + Math.sin(t * 3) * 0.015);
+  const s = easeOutBack(k); ctx.scale(s, s);
+  extrudedText('SALUTE!', 0, 0, 120, { fill: COL.title });
+  ctx.restore();
+  // sparkles around the glass
+  for (let i = 0; i < 6; i++) {
+    const p = seg(t, T.out + 0.2 + i * 0.12, T.out + 0.6 + i * 0.12);
+    if (p <= 0) continue;
+    const a = -Math.PI * 0.95 + i * (Math.PI * 0.9 / 5);
+    const x = G.cx + Math.cos(a) * 270, y = 700 + Math.sin(a) * 200;
+    const r = 14 * easeOutBack(p) * (1 + 0.15 * Math.sin(t * 8 + i));
+    sketch([[x, y - r], [x, y + r]], { color: COL.orangeDark, width: 3.5, seed: 190 + i, amp: 0.2 });
+    sketch([[x - r, y], [x + r, y]], { color: COL.orangeDark, width: 3.5, seed: 196 + i, amp: 0.2 });
+  }
+}
+
+// ---------- the frame ----------
+function render(t) {
+  t = clamp(t, 0, DURATION);
+  BOIL = Math.floor(t * 8);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  // glass slides right to make room for the ingredient list, then back for the outro
+  G.cx = lerp(lerp(540, 600, easeInOut(seg(t, 3.3, 4.1))), 540, easeInOut(seg(t, T.out, T.out + 0.7)));
+
+  const v = volumes(t);
+  const surfaceY = levelY(v.gin + v.camp + v.verm);
+  const cubes = cubeStates(t, surfaceY);
+  const spoon = spoonState(t, surfaceY);
+
+  drawPaper();
+  drawTitle(t);
+  drawChecklist(t);
+  drawLevelMarks(t, v);
+  for (const b of Object.values(BOTTLES)) drawStream(t, b, surfaceY);
+  drawGlass(t, v, cubes, spoon);
+  drawClinks(t, cubes);
+  drawGarnish(t);
+  Object.values(BOTTLES).forEach((b, i) => { const p = bottlePose(t, b.start); if (p) drawBottle(p, b, 200 + i * 10); });
+  drawCounter(t, v);
+  drawCaptions(t);
+  drawOutro(t);
+}
+
+// ---------- boot: preview or export ----------
+window.DURATION = DURATION; window.FPS = FPS; window.render = render;
+window.ready = document.fonts.ready.then(() => Promise.all([
+  document.fonts.load(`150px ${FONT_TITLE}`), document.fonts.load(`40px ${FONT_HAND}`),
+])).then(() => { render(0); return true; });
+
+if (new URLSearchParams(location.search).has('export')) {
+  document.body.classList.add('export');
+} else {
+  const scrub = document.getElementById('scrub'), btn = document.getElementById('play'), time = document.getElementById('time');
+  let playing = true, t0 = performance.now(), cur = 0;
+  btn.onclick = () => { playing = !playing; btn.textContent = playing ? 'Pause' : 'Play'; t0 = performance.now() - cur * 1000; };
+  scrub.oninput = () => { cur = +scrub.value; t0 = performance.now() - cur * 1000; render(cur); time.textContent = cur.toFixed(2) + 's'; };
+  window.ready.then(function loop() {
+    if (playing) {
+      cur = ((performance.now() - t0) / 1000) % (DURATION + 1.5);
+      if (cur > DURATION) cur = DURATION;
+      render(cur); scrub.value = cur; time.textContent = cur.toFixed(2) + 's';
+    }
+    requestAnimationFrame(loop);
+  });
+}
+</script>
+</body>
+</html>
